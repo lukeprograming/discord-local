@@ -1,0 +1,67 @@
+{
+  "name": "discord-local",
+  "productName": "Discord Local",
+  "version": "0.2.0",
+  "description": "Chat, call e transmissão de tela privados",
+  "author": "Lukeprograming",
+  "private": true,
+  "main": "electron/main.cjs",
+  "scripts": {
+    "build": "vite build && vite build -c vite.server.config.ts",
+    "start": "npm run build && electron .",
+    "check": "tsc --noEmit",
+    "dist:linux": "npm run build && electron-builder --linux AppImage",
+    "dist:win": "npm run build && electron-builder --win nsis",
+    "dist": "npm run build && electron-builder --linux AppImage --win nsis"
+  },
+  "build": {
+    "appId": "local.discord.app",
+    "files": [
+      "electron/**",
+      "dist/**"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Network"
+    },
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "include": "build/installer.nsh"
+    },
+    "artifactName": "Discord-Local-${version}-${os}.${ext}",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "lukeprograming",
+        "repo": "discord-local"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lukeprograming/discord-local.git"
+  }
+}

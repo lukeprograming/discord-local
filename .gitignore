@@ -18,3 +18,15 @@ __pycache__/
 
 # Áudio de teste gravado
 *.wav
+
+# Discord Local
+node_modules/
+server/data/
+desktop/dist/
+desktop/release/
+desktop/electron/generated/
+
+# Pessoal (fica só neste PC)
+CHAT DE AI/
+CO WORK CALUDE CODEX/
+linux-receiver/
