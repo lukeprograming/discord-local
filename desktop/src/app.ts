@@ -199,12 +199,19 @@ class App {
     this.set({ host, connection: 'offline', connectionId: null, calls: {}, presences: {} });
   }
 
+  /** Troca IP/VPN do host; se a sessão estava online, reinicia o servidor no endereço novo. */
   async updateHostConfig(cfg: HostConfig): Promise<void> {
     const p = this.state.profile;
     if (!p) return;
+    const wasRunning = this.state.host.running;
+    if (wasRunning) await this.stopSession();
     const profile = { ...p, host: cfg, server_url: `http://${cfg.ip}:${cfg.port}` };
     await window.native.saveProfile(profile);
     this.set({ profile });
+    if (wasRunning) {
+      await this.runHost(cfg);
+      this.connect(profile);
+    }
   }
 
   /** Gera o instalador dos amigos com o endereço deste host e um convite embutido. */

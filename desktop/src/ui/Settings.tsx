@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { app, errorMessage, useApp } from '../app.ts';
 import { UpdateSection } from './Update.tsx';
+import type { NetInterface } from '../native.d.ts';
 
 export function Settings({ onClose }: { onClose: () => void }) {
   const profile = useApp((s) => s.profile)!;
@@ -91,6 +92,7 @@ function HostSection() {
       <p className="small">
         {profile.host?.name} — <code>{profile.server_url}</code>
       </p>
+      <NetworkPicker />
       <h4>Convidar amigos</h4>
       <p className="muted small">
         Gera um instalador que já vem com o seu endereço e um convite: o amigo só instala e cria a conta.
@@ -115,6 +117,65 @@ function HostSection() {
           <button className="link" onClick={() => exportFor(result.endsWith('.exe') ? 'win32' : 'linux', true)}>
             gerar de novo a partir de outro instalador base
           </button>
+        </p>
+      )}
+      {error && <div className="error">{error}</div>}
+    </>
+  );
+}
+
+/** Escolhe em qual VPN (IP) o servidor escuta. Amigos com instalador antigo precisam do endereço novo. */
+function NetworkPicker() {
+  const profile = useApp((s) => s.profile)!;
+  const busy = useApp((s) => s.hostBusy);
+  const current = profile.host!;
+  const [ifaces, setIfaces] = useState<NetInterface[]>([]);
+  const [ip, setIp] = useState(current.ip);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    window.native.interfaces().then(setIfaces);
+  }, []);
+
+  async function apply() {
+    setError('');
+    setSaved(false);
+    const vpn = ifaces.find((i) => i.ip === ip)?.vpn;
+    try {
+      await app.updateHostConfig({ ...current, ip, tailscale: vpn === 'Tailscale' });
+      setSaved(true);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  return (
+    <>
+      <label>Rede (IP da VPN)</label>
+      <div className="iface-list">
+        {ifaces.map((i) => (
+          <label key={i.ip} className="check">
+            <input type="radio" checked={ip === i.ip} onChange={() => { setIp(i.ip); setSaved(false); }} />
+            <span>
+              <strong>{i.vpn}</strong> <code>{i.ip}</code> <small className="muted">{i.name}</small>
+            </span>
+          </label>
+        ))}
+        {!ifaces.some((i) => i.ip === current.ip) && (
+          <label className="check">
+            <input type="radio" checked={ip === current.ip} onChange={() => setIp(current.ip)} />
+            <span><code>{current.ip}</code> <small className="muted">(atual, não encontrado agora)</small></span>
+          </label>
+        )}
+      </div>
+      {ip !== current.ip && (
+        <button disabled={busy} onClick={apply}>{busy ? 'Reiniciando servidor…' : 'Usar esta rede'}</button>
+      )}
+      {saved && (
+        <p className="small ok-text">
+          Pronto. Seus amigos agora entram por <code>{profile.server_url}</code> — exporte o instalador de novo ou
+          passe esse endereço para eles.
         </p>
       )}
       {error && <div className="error">{error}</div>}
