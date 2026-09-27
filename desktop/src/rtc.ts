@@ -55,6 +55,8 @@ export class CallSession {
   deafened = false;
   screen: MediaStream | null = null;
   localSpeaking = false;
+  /** Entrou sem microfone: só ouve. */
+  noMic = false;
   onChange: () => void = () => {};
   /** Transmissão parada pelo botão do sistema (fora do app). */
   onScreenEnded: () => void = () => {};
@@ -76,20 +78,29 @@ export class CallSession {
     this.myConnectionId = myConnectionId;
   }
 
-  async start(micId?: string, speakerId?: string): Promise<void> {
+  /** Sem microfone a call continua funcionando só para ouvir (e ver/transmitir tela). Devolve o erro do microfone, se houve. */
+  async start(micId?: string, speakerId?: string): Promise<Error | null> {
     this.speakerId = speakerId;
-    this.mic = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        deviceId: micId ? { ideal: micId } : undefined,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-      },
-    });
-    this.localAnalyser = this.analyse(this.mic);
+    let micError: Error | null = null;
+    try {
+      this.mic = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: micId ? { ideal: micId } : undefined,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+      });
+      this.localAnalyser = this.analyse(this.mic);
+    } catch (e) {
+      micError = e as Error;
+      this.noMic = true;
+      this.muted = true;
+    }
     this.vadTimer = window.setInterval(() => this.detectSpeaking(), 150);
     this.ready = true;
+    return micError;
   }
 
   remotes(): RemotePeer[] {
@@ -152,7 +163,7 @@ export class CallSession {
   }
 
   setMuted(muted: boolean): void {
-    this.muted = muted;
+    this.muted = muted || this.noMic;
     for (const t of this.mic?.getAudioTracks() ?? []) t.enabled = !muted && !this.deafened;
     this.onChange();
   }
@@ -285,6 +296,8 @@ export class CallSession {
     };
 
     for (const t of this.mic?.getTracks() ?? []) pc.addTrack(t, this.mic!);
+    // Sem microfone não há o que enviar e a negociação nem começaria: pede só para receber o áudio.
+    if (!this.mic) pc.addTransceiver('audio', { direction: 'recvonly' });
     if (this.screen && this.screenCfg) this.attachScreen(peer, this.screenCfg.bitrate, this.screenCfg.fps);
     return peer;
   }

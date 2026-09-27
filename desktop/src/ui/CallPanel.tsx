@@ -133,7 +133,12 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
       </div>
 
       <div className="call-controls">
-        <button className={`round ${session.muted ? 'off' : ''}`} title={session.muted ? 'Ativar microfone' : 'Silenciar'} onClick={() => app.toggleMute()}>
+        <button
+          className={`round ${session.muted ? 'off' : ''}`}
+          title={session.noMic ? 'Sem microfone — você está só ouvindo' : session.muted ? 'Ativar microfone' : 'Silenciar'}
+          disabled={session.noMic}
+          onClick={() => app.toggleMute()}
+        >
           {session.muted ? '🔇' : '🎙'}
         </button>
         <button className={`round ${session.deafened ? 'off' : ''}`} title={session.deafened ? 'Voltar a ouvir' : 'Ensurdecer'} onClick={() => app.toggleDeafen()}>

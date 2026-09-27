@@ -546,18 +546,16 @@ class App {
     session.onChange = () => this.bump();
     session.onScreenEnded = () => this.pushCallState();
     this.set({ call: session, ringing: null, callError: null });
-    try {
-      const s = this.state.profile?.settings;
-      await session.start(s?.mic_id, s?.speaker_id);
-    } catch (e) {
-      session.close();
-      const msg = micErrorMessage(e as Error);
-      this.set({ call: null, callError: msg });
-      // O painel da call some junto quando ninguém mais está nela; o toast garante que o erro apareça.
+    const s = this.state.profile?.settings;
+    const micError = await session.start(s?.mic_id, s?.speaker_id);
+    if (micError) {
+      const msg = `${micErrorMessage(micError)} Você entrou só para ouvir.`;
+      this.set({ callError: msg });
       this.toast(msg);
-      return;
     }
     await gw.request('call.join', { conversation_id: conversationId });
+    // Os outros veem que estou mutado (sem microfone).
+    if (session.noMic) this.pushCallState();
     // Se o call.update chegou antes do microfone ficar pronto, sincroniza agora.
     const info = this.state.calls[conversationId];
     if (info) session.sync(info);
