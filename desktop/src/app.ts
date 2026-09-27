@@ -18,6 +18,20 @@ export function errorMessage(e: unknown): string {
   return String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 }
 
+/** Traduz o erro do getUserMedia para algo que dá pra resolver. */
+function micErrorMessage(e: Error): string {
+  switch (e.name) {
+    case 'NotAllowedError':
+      return 'Sem permissão para usar o microfone. No Windows: Configurações → Privacidade → Microfone → permitir apps da área de trabalho.';
+    case 'NotFoundError':
+      return 'Nenhum microfone encontrado. Conecte ou ative um microfone e tente de novo.';
+    case 'NotReadableError':
+      return 'O microfone está ocupado ou travado por outro programa.';
+    default:
+      return `Microfone indisponível: ${e.message}`;
+  }
+}
+
 export type State = {
   booted: boolean;
   profile: Profile | null;
@@ -537,7 +551,10 @@ class App {
       await session.start(s?.mic_id, s?.speaker_id);
     } catch (e) {
       session.close();
-      this.set({ call: null, callError: `Microfone indisponível: ${(e as Error).message}` });
+      const msg = micErrorMessage(e as Error);
+      this.set({ call: null, callError: msg });
+      // O painel da call some junto quando ninguém mais está nela; o toast garante que o erro apareça.
+      this.toast(msg);
       return;
     }
     await gw.request('call.join', { conversation_id: conversationId });
