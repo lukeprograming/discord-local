@@ -101,9 +101,6 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     }
   });
 
-  const wss = new WebSocketServer({ server, path: '/gateway', maxPayload: 256 * 1024 });
-  wss.on('connection', (ws) => gateway.attach(ws));
-
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(opts.port, opts.host, () => {
@@ -111,6 +108,9 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       resolve();
     });
   });
+  // Só depois do listen: o ws repassa erros do servidor (ex.: porta em uso) e, sem ouvinte, viram exceção não tratada.
+  const wss = new WebSocketServer({ server, path: '/gateway', maxPayload: 256 * 1024 });
+  wss.on('connection', (ws) => gateway.attach(ws));
   const url = `http://${opts.host}:${opts.port}`;
   console.log(`[server] ouvindo em ${url}  (banco: ${dbPath})`);
   if (db.userCount() === 0) console.log('[server] nenhum usuário ainda: o primeiro cadastro vira admin, sem convite');

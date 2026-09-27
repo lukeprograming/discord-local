@@ -14,6 +14,17 @@ const profileArg = process.argv.find((a) => a.startsWith('--profile='));
 const profile = profileArg ? profileArg.split('=')[1].replace(/[^a-zA-Z0-9_-]/g, '') : '';
 if (profile) app.setPath('userData', path.join(app.getPath('appData'), `discord-local-${profile}`));
 
+// Uma cópia por perfil: duas tentariam subir o mesmo servidor e mexer nos mesmos arquivos.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
+app.on('second-instance', () => {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.focus();
+});
+
 // Sem isso o Chromium esconde o IP local atrás de um nome .local (mDNS),
 // que não resolve pela VPN, e o WebRTC não conecta.
 app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
