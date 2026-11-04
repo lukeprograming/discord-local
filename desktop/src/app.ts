@@ -10,12 +10,12 @@ import type {
 import { MAX_MESSAGE_LENGTH } from '../../shared/protocol.ts';
 import { GatewayClient, httpPost } from './gateway.ts';
 import { CallSession, type AudioKind, type ScreenPreset } from './rtc.ts';
-import type { MicSettings } from './mic.ts';
+import { DEFAULT_NOISE, type MicSettings } from './mic.ts';
 import { ulid } from './ulid.ts';
 import type { EmbeddedConfig, HostConfig, HostStatus, Profile, Settings, UpdateStatus } from './native.d.ts';
 
 export function micSettings(s: Settings | undefined): MicSettings {
-  return { volume: s?.mic_volume ?? 1, threshold: s?.mic_threshold ?? null };
+  return { volume: s?.mic_volume ?? 1, threshold: s?.mic_threshold ?? null, noise: s?.mic_noise ?? DEFAULT_NOISE };
 }
 
 /** Erros vindos do processo principal chegam com prefixo do Electron. */
@@ -651,8 +651,8 @@ class App {
   }
   private volumeSaveTimer = 0;
 
-  /** Volume/sensibilidade do meu microfone: vale na hora, inclusive dentro da call. */
-  async saveMicSettings(patch: Pick<Settings, 'mic_volume' | 'mic_threshold'>): Promise<void> {
+  /** Volume/sensibilidade/supressão de ruído do meu microfone: vale na hora, inclusive dentro da call. */
+  async saveMicSettings(patch: Pick<Settings, 'mic_volume' | 'mic_threshold' | 'mic_noise'>): Promise<void> {
     await this.saveSettings(patch);
     this.state.call?.setMicSettings(micSettings(this.state.profile?.settings));
   }

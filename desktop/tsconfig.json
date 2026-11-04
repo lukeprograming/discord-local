@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "../shared", "vite.config.ts"]
+  "include": ["src", "../shared", "vite.config.ts", "vite-wasm-base64.ts"]
 }

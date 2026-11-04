@@ -43,6 +43,8 @@ export type Settings = {
   mic_volume?: number;
   /** Sensibilidade em dB: abaixo disso os outros não me ouvem. Ausente = automático (sempre aberto). */
   mic_threshold?: number | null;
+  /** Supressão de ruído do microfone. Ausente = padrão (GTCRN). */
+  mic_noise?: 'off' | 'native' | 'rnnoise' | 'gtcrn';
   /** Volume que eu escolhi para cada pessoa: voz e áudio da transmissão de tela. */
   user_volumes?: Record<string, { voice?: number; screen?: number }>;
 };

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { app, errorMessage, micSettings, useApp } from '../app.ts';
-import { MicProcessor } from '../mic.ts';
+import { MIC_SAMPLE_RATE, MicProcessor, micConstraints, type NoiseMode } from '../mic.ts';
 import { UpdateSection } from './Update.tsx';
 import type { NetInterface } from '../native.d.ts';
 
@@ -79,6 +79,19 @@ export function Settings({ onClose }: { onClose: () => void }) {
 
 const DB_MIN = -80;
 
+const NOISE_OPTIONS: [NoiseMode, string][] = [
+  ['gtcrn', 'IA (GTCRN) — padrão'],
+  ['rnnoise', 'IA leve (RNNoise)'],
+  ['native', 'Básica (do navegador)'],
+  ['off', 'Desligada'],
+];
+const NOISE_HINT: Record<NoiseMode, string> = {
+  gtcrn: 'Tira chiado, ventilador e barulho de fundo preservando a voz.',
+  rnnoise: 'Mais antiga e mais leve; limpa menos. Use se o GTCRN pesar no aparelho.',
+  native: 'O filtro simples do Chromium: tira só chiado leve.',
+  off: 'Som cru do microfone (bom para música/instrumento).',
+};
+
 /** Volume e sensibilidade do microfone, com medidor ao vivo para achar o ponto certo. */
 function MicSection() {
   const settings = useApp((s) => s.profile?.settings);
@@ -86,44 +99,49 @@ function MicSection() {
   const auto = mic.threshold === null;
   const [level, setLevel] = useState({ db: -100, open: true });
   const [error, setError] = useState('');
+  const [noiseError, setNoiseError] = useState<string | null>(null);
+  const [listen, setListen] = useState(false);
   const procRef = useRef<MicProcessor | null>(null);
+  const listenRef = useRef(listen);
+  listenRef.current = listen;
 
-  // Captura própria só para o medidor (nada é enviado nem tocado).
+  // Captura própria para o medidor e para o "ouvir meu microfone" (nada é enviado).
   useEffect(() => {
     let stopped = false;
     let stream: MediaStream | null = null;
-    const ctx = new AudioContext();
+    const ctx = new AudioContext({ sampleRate: MIC_SAMPLE_RATE }) as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+    if (settings?.speaker_id) ctx.setSinkId?.(settings.speaker_id).catch(() => {});
+    const initial = micSettings(app.state.profile?.settings);
     navigator.mediaDevices
-      .getUserMedia({
-        audio: {
-          deviceId: settings?.mic_id ? { ideal: settings.mic_id } : undefined,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1,
-        },
-      })
+      .getUserMedia({ audio: micConstraints(settings?.mic_id, initial.noise) })
       .then(async (st) => {
         stream = st;
         if (stopped) return;
-        const proc = await MicProcessor.create(ctx, st, micSettings(app.state.profile?.settings));
-        if (stopped) return;
+        const proc = await MicProcessor.create(ctx, st, initial);
+        if (stopped) return proc.destroy();
         procRef.current = proc;
         if (!proc.hasGate) setError('Este aparelho não suporta o ajuste de sensibilidade.');
         proc.onLevel = (db, open) => setLevel({ db, open });
+        proc.onNoiseChange = (_active, err) => setNoiseError(err);
+        proc.monitor(listenRef.current);
       })
       .catch((e) => setError(`Sem microfone para testar: ${(e as Error).message}`));
     return () => {
       stopped = true;
+      procRef.current?.destroy();
       procRef.current = null;
       for (const t of stream?.getTracks() ?? []) t.stop();
       ctx.close();
     };
-  }, [settings?.mic_id]);
+  }, [settings?.mic_id, settings?.speaker_id]);
 
   useEffect(() => {
     procRef.current?.set(mic);
-  }, [mic.volume, mic.threshold]);
+  }, [mic.volume, mic.threshold, mic.noise]);
+
+  useEffect(() => {
+    procRef.current?.monitor(listen);
+  }, [listen]);
 
   const pct = (db: number) => `${Math.max(0, Math.min(100, ((db - DB_MIN) / -DB_MIN) * 100))}%`;
   const threshold = mic.threshold ?? -50;
@@ -140,6 +158,21 @@ function MicSection() {
           value={Math.round(mic.volume * 100)}
           onChange={(e) => app.saveMicSettings({ mic_volume: Number(e.target.value) / 100 })}
         />
+      </label>
+      <label>
+        Supressão de ruído
+        <select value={mic.noise} onChange={(e) => app.saveMicSettings({ mic_noise: e.target.value as NoiseMode })}>
+          {NOISE_OPTIONS.map(([v, label]) => (
+            <option key={v} value={v}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <small className="muted">{noiseError ?? NOISE_HINT[mic.noise]}</small>
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={listen} onChange={(e) => setListen(e.target.checked)} />
+        Ouvir meu microfone <small className="muted">(use fone; é exatamente o que os outros recebem)</small>
       </label>
       <div className="mic-sensitivity">
         <span>Sensibilidade do microfone</span>

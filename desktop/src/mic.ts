@@ -1,12 +1,26 @@
 /**
- * Tratamento do microfone antes de enviar: volume (ganho) e sensibilidade
- * (noise gate — abaixo do limite os outros recebem silêncio).
+ * Tratamento do microfone antes de enviar: supressão de ruído, volume (ganho)
+ * e sensibilidade (noise gate — abaixo do limite os outros recebem silêncio).
  *
- *   mic → ganho → gate (AudioWorklet) → stream enviada
+ *   mic → supressão por IA (opcional) → ganho → gate (AudioWorklet) → stream enviada
+ *
+ * A stream de saída é sempre a mesma: trocar a supressão no meio da call não
+ * precisa renegociar nada com os outros.
  */
+import type { AiMode, AiNode } from './noise-ai.ts';
 
 /** Limite padrão usado para "falando" quando a sensibilidade está no automático. */
 export const AUTO_SPEAKING_DB = -34;
+
+/**
+ * off: nada. native: filtro embutido do Chromium/WebRTC (leve, fraco).
+ * rnnoise: IA leve, clássica. gtcrn: IA mais nova, limpa mais e preserva melhor a voz.
+ */
+export type NoiseMode = 'off' | 'native' | AiMode;
+/** GTCRN venceu o RNNoise em todos os testes (voz + chiado/ventilador): +6 a +9 dB de limpeza com a mesma voz. */
+export const DEFAULT_NOISE: NoiseMode = 'gtcrn';
+/** Toda captura de microfone usa esta taxa, exigida pelos modelos de IA. */
+export const MIC_SAMPLE_RATE = 48000;
 
 const workletUrl = new URL('./gate-worklet.js', import.meta.url).href;
 const loaded = new WeakMap<BaseAudioContext, Promise<void>>();
@@ -20,28 +34,54 @@ function loadWorklet(ctx: AudioContext): Promise<void> {
   return p;
 }
 
-export type MicSettings = { volume: number; threshold: number | null };
+export type MicSettings = { volume: number; threshold: number | null; noise: NoiseMode };
+
+/** Constraints do getUserMedia. A supressão nativa só fica ligada no modo "native": somada à IA ela come a voz. */
+export function micConstraints(micId: string | undefined, noise: NoiseMode): MediaTrackConstraints {
+  return {
+    deviceId: micId ? { ideal: micId } : undefined,
+    echoCancellation: true,
+    noiseSuppression: noise === 'native',
+    autoGainControl: true,
+    channelCount: 1,
+    sampleRate: MIC_SAMPLE_RATE,
+  };
+}
 
 export class MicProcessor {
-  /** Stream que vai para os outros (já com ganho e gate). */
+  /** Stream que vai para os outros (já com supressão, ganho e gate). */
   readonly output: MediaStream;
   /** Nível atual (dB, antes do gate) e se o gate está aberto. */
   db = -100;
   open = true;
   onLevel: (db: number, open: boolean) => void = () => {};
+  /** Modo de supressão realmente em uso (cai para "native" se a IA não carregar). */
+  activeNoise: NoiseMode = 'off';
+  onNoiseChange: (active: NoiseMode, error: string | null) => void = () => {};
 
+  private ctx: AudioContext;
+  private track: MediaStreamTrack | undefined;
+  private src: MediaStreamAudioSourceNode;
+  private ai: AiNode | null = null;
   private gain: GainNode;
   private gate: AudioWorkletNode | null;
+  private last: AudioNode;
   private threshold: number | null;
+  private wantedNoise: NoiseMode | null = null;
+  private noiseJob: Promise<void> = Promise.resolve();
+  private monitoring = false;
+  private destroyed = false;
 
   private constructor(ctx: AudioContext, input: MediaStream, gate: AudioWorkletNode | null, s: MicSettings) {
-    const src = ctx.createMediaStreamSource(input);
+    this.ctx = ctx;
+    this.track = input.getAudioTracks()[0];
+    this.src = ctx.createMediaStreamSource(input);
     this.gain = ctx.createGain();
     this.gain.gain.value = s.volume;
     this.threshold = s.threshold;
     const dest = ctx.createMediaStreamDestination();
     dest.channelCount = 1;
-    src.connect(this.gain);
+    this.src.connect(this.gain);
     this.gate = gate;
     if (gate) {
       this.gain.connect(gate).connect(dest);
@@ -54,10 +94,11 @@ export class MicProcessor {
     } else {
       this.gain.connect(dest);
     }
+    this.last = gate ?? this.gain;
     this.output = dest.stream;
   }
 
-  /** Sem AudioWorklet (navegador muito antigo) ainda devolve o ganho, só sem gate. */
+  /** Sem AudioWorklet (navegador muito antigo) ainda devolve o ganho, só sem gate nem IA. */
   static async create(ctx: AudioContext, input: MediaStream, s: MicSettings): Promise<MicProcessor> {
     let gate: AudioWorkletNode | null = null;
     try {
@@ -67,13 +108,77 @@ export class MicProcessor {
       console.warn('[mic] sem noise gate', e);
     }
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    return new MicProcessor(ctx, input, gate, s);
+    const proc = new MicProcessor(ctx, input, gate, s);
+    proc.setNoise(s.noise);
+    return proc;
   }
 
   set(s: MicSettings): void {
     this.gain.gain.value = s.volume;
     this.threshold = s.threshold;
     this.gate?.port.postMessage({ threshold: s.threshold });
+    this.setNoise(s.noise);
+  }
+
+  /** Troca a supressão de ruído. As trocas rodam em fila; só a última pedida vale. */
+  setNoise(mode: NoiseMode): void {
+    if (mode === this.wantedNoise) return;
+    this.wantedNoise = mode;
+    this.noiseJob = this.noiseJob.then(() => this.applyNoise(mode));
+  }
+
+  private async applyNoise(mode: NoiseMode): Promise<void> {
+    if (this.destroyed || mode !== this.wantedNoise) return;
+    let node: AiNode | null = null;
+    let error: string | null = null;
+    if (mode === 'rnnoise' || mode === 'gtcrn') {
+      try {
+        const { createAiNode } = await import('./noise-ai.ts');
+        node = await createAiNode(this.ctx, mode);
+      } catch (e) {
+        console.warn('[mic] supressão por IA indisponível', e);
+        error = `Supressão por IA indisponível (${(e as Error).message}); usando a nativa.`;
+      }
+      // Pediram outra coisa enquanto carregava, ou fechou.
+      if (this.destroyed || mode !== this.wantedNoise) {
+        node?.destroy();
+        return;
+      }
+    }
+    const active: NoiseMode = node ? mode : mode === 'off' ? 'off' : 'native';
+
+    // Liga/desliga o filtro nativo na própria captura, mantendo as outras constraints (aparelho etc.).
+    const native = active === 'native';
+    if (this.track && this.track.getSettings().noiseSuppression !== native) {
+      await this.track.applyConstraints({ ...this.track.getConstraints(), noiseSuppression: native }).catch((e) => {
+        console.warn('[mic] applyConstraints', e);
+      });
+    }
+
+    this.src.disconnect();
+    if (this.ai) {
+      this.ai.disconnect();
+      this.ai.destroy();
+    }
+    this.ai = node;
+    if (node) this.src.connect(node).connect(this.gain);
+    else this.src.connect(this.gain);
+    this.activeNoise = active;
+    this.onNoiseChange(active, error);
+  }
+
+  /** Toca o que os outros vão ouvir na minha própria saída (teste nas Configurações). */
+  monitor(on: boolean): void {
+    if (on === this.monitoring) return;
+    this.monitoring = on;
+    if (on) this.last.connect(this.ctx.destination);
+    else this.last.disconnect(this.ctx.destination);
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.ai?.destroy();
+    this.ai = null;
   }
 
   /** "Falando" para o indicador: gate aberto (manual) ou acima do limite padrão (automático). */

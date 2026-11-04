@@ -1,6 +1,6 @@
 import type { CallInfo, RtcSignal } from '../../shared/protocol.ts';
 import type { GatewayClient } from './gateway.ts';
-import { MicProcessor, type MicSettings } from './mic.ts';
+import { MIC_SAMPLE_RATE, MicProcessor, micConstraints, type MicSettings } from './mic.ts';
 
 export type ScreenPreset = '720p30' | '1080p30' | '1080p60';
 
@@ -97,7 +97,8 @@ export class CallSession {
   private micProc: MicProcessor | null = null;
   private peers = new Map<string, Peer>();
   private opts!: CallOptions;
-  private audioCtx = new AudioContext();
+  // 48 kHz: a supressão de ruído por IA exige (o mesmo contexto também toca o áudio dos outros).
+  private audioCtx = new AudioContext({ sampleRate: MIC_SAMPLE_RATE });
   private localAnalyser: AnalyserNode | null = null;
   private vadTimer = 0;
   private closed = false;
@@ -117,15 +118,7 @@ export class CallSession {
     }
     let micError: Error | null = null;
     try {
-      this.mic = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: opts.micId ? { ideal: opts.micId } : undefined,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1,
-        },
-      });
+      this.mic = await navigator.mediaDevices.getUserMedia({ audio: micConstraints(opts.micId, opts.mic.noise) });
       try {
         this.micProc = await MicProcessor.create(this.audioCtx, this.mic, opts.mic);
         this.send = this.micProc.output;
@@ -316,6 +309,7 @@ export class CallSession {
     for (const t of this.mic?.getTracks() ?? []) t.stop();
     for (const t of this.screen?.getTracks() ?? []) t.stop();
     for (const t of this.camera?.getTracks() ?? []) t.stop();
+    this.micProc?.destroy();
     this.audioCtx.close();
   }
 
