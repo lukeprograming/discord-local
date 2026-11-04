@@ -10,6 +10,7 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
   const session = s.call?.conversationId === conversation.id ? s.call : null;
   const [shareOpen, setShareOpen] = useState(false);
   const [focused, setFocused] = useState<string | null>(null); // mostrar só a tela dessa conexão
+  const [volumeFor, setVolumeFor] = useState<string | null>(null); // conexão com o popup de volume aberto
   const stage = s.stage;
   const [height, setHeight] = useState(() => {
     try {
@@ -116,9 +117,25 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
           const me = p.connection_id === s.connectionId;
           const r = remotes.get(p.connection_id);
           const speaking = me ? session.localSpeaking : r?.speaking;
+          const cam = me ? session.camera : (r?.camera ?? null);
           return (
-            <div key={p.connection_id} className="call-person" title={r ? `conexão: ${r.state}` : undefined}>
-              <Avatar user={app.user(p.user_id)} size={48} speaking={speaking} />
+            <div
+              key={p.connection_id}
+              className={`call-person ${!me ? 'clickable' : ''}`}
+              title={me ? undefined : `Clique para ajustar o volume${r ? ` — conexão: ${r.state}` : ''}`}
+              onClick={me ? undefined : () => setVolumeFor(volumeFor === p.connection_id ? null : p.connection_id)}
+            >
+              {cam ? (
+                <div
+                  className={`cam-tile ${speaking ? 'speaking' : ''} ${me ? 'mirror' : ''}`}
+                  title="Clique duas vezes para tela cheia"
+                  onDoubleClick={(e) => (e.currentTarget as HTMLElement).requestFullscreen()}
+                >
+                  <Video stream={cam} muted />
+                </div>
+              ) : (
+                <Avatar user={app.user(p.user_id)} size={48} speaking={speaking} />
+              )}
               <span>
                 {app.user(p.user_id)?.display_name}
                 {p.muted && ' 🔇'}
@@ -126,6 +143,9 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
                 {p.screen_sharing && ' 🖥'}
               </span>
               {!me && r && r.state !== 'connected' && <small className="muted">{r.state === 'failed' ? 'falhou' : 'conectando…'}</small>}
+              {volumeFor === p.connection_id && (
+                <VolumePopover userId={p.user_id} sharing={p.screen_sharing} onClose={() => setVolumeFor(null)} />
+              )}
             </div>
           );
         })}
@@ -144,7 +164,15 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
         <button className={`round ${session.deafened ? 'off' : ''}`} title={session.deafened ? 'Voltar a ouvir' : 'Ensurdecer'} onClick={() => app.toggleDeafen()}>
           {session.deafened ? '🙉' : '🎧'}
         </button>
-        {session.screen ? (
+        {window.native.setSpeaker && (
+          <button className={`round ${s.speaker ? 'on' : ''}`} title={s.speaker ? 'Alto-falante (tocar para usar o fone)' : 'Fone do celular (tocar para usar o alto-falante)'} onClick={() => app.setSpeaker(!s.speaker)}>
+            {s.speaker ? '🔊' : '📱'}
+          </button>
+        )}
+        <button className={`round ${session.camera ? 'on' : ''}`} title={session.camera ? 'Desligar câmera' : 'Ligar câmera'} onClick={() => app.toggleCamera()}>
+          📷
+        </button>
+        {!navigator.mediaDevices?.getDisplayMedia ? null : session.screen ? (
           <button className="round on" title="Parar transmissão" onClick={() => app.stopScreen()}>
             ⏹
           </button>
@@ -174,6 +202,53 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
       <div className="stage-resizer" title="Arraste para aumentar ou diminuir" onPointerDown={startResize} />
     )}
     </>
+  );
+}
+
+function VolumePopover({ userId, sharing, onClose }: { userId: string; sharing: boolean; onClose: () => void }) {
+  useApp((s) => s.profile?.settings?.user_volumes?.[userId]); // redesenha quando muda
+  const mobile = useApp((s) => s.platform === 'android');
+  const max = mobile ? 100 : 200; // no celular o som sai pelo <audio>, que não passa de 100%
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      // Clique no próprio card da pessoa já fecha pelo toggle.
+      if (!ref.current?.parentElement?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const row = (kind: 'voice' | 'screen', label: string) => {
+    const v = Math.round(app.userVolume(userId, kind) * 100);
+    return (
+      <label>
+        <span>
+          {label} <small className="muted">{Math.min(v, max)}%</small>
+          {v !== 100 && (
+            <button className="link" onClick={() => app.setUserVolume(userId, kind, 1)}>
+              100%
+            </button>
+          )}
+        </span>
+        <input type="range" min={0} max={max} step={5} value={Math.min(v, max)} onChange={(e) => app.setUserVolume(userId, kind, Number(e.target.value) / 100)} />
+      </label>
+    );
+  };
+
+  return (
+    <div ref={ref} className="volume-popover" onClick={(e) => e.stopPropagation()}>
+      <strong>{app.user(userId)?.display_name}</strong>
+      {row('voice', '🎙 Voz')}
+      {row('screen', '🖥 Áudio da transmissão')}
+      {!sharing && <small className="muted">O áudio da transmissão vale quando essa pessoa transmitir a tela com som.</small>}
+    </div>
   );
 }
 

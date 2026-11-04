@@ -1,5 +1,6 @@
 import type { CallInfo, RtcSignal } from '../../shared/protocol.ts';
 import type { GatewayClient } from './gateway.ts';
+import { MicProcessor, type MicSettings } from './mic.ts';
 
 export type ScreenPreset = '720p30' | '1080p30' | '1080p60';
 
@@ -9,12 +10,35 @@ export const SCREEN_PRESETS: Record<ScreenPreset, { width: number; height: numbe
   '1080p60': { width: 1920, height: 1080, fps: 60, bitrate: 6_000_000, label: '1080p 60fps' },
 };
 
+const CAMERA = { width: 1280, height: 720, fps: 30, bitrate: 1_500_000 };
+
+/** voice = microfone da pessoa; screen = áudio do PC que vem junto com a transmissão de tela. */
+export type AudioKind = 'voice' | 'screen';
+
 export type RemotePeer = {
   connectionId: string;
   userId: string;
   state: RTCPeerConnectionState;
   screen: MediaStream | null;
+  camera: MediaStream | null;
   speaking: boolean;
+};
+
+export type CallOptions = {
+  micId?: string;
+  speakerId?: string;
+  mic: MicSettings;
+  /** webaudio: volume até 200% e saída escolhida pelo AudioContext (desktop). element: <audio> até 100% (Android, que roteia fone/alto-falante por fora). */
+  playback: 'webaudio' | 'element';
+  /** Volume (1 = 100%) que eu escolhi para essa pessoa. */
+  volumeOf: (userId: string, kind: AudioKind) => number;
+};
+
+type RemoteAudio = {
+  stream: MediaStream;
+  el: HTMLAudioElement;
+  gain: GainNode | null;
+  analyser: AnalyserNode | null;
 };
 
 type Peer = {
@@ -23,10 +47,12 @@ type Peer = {
   polite: boolean;
   makingOffer: boolean;
   ignoreOffer: boolean;
-  audioEls: Map<string, HTMLAudioElement>; // stream.id -> <audio>
-  screen: MediaStream | null;
+  audios: Map<string, RemoteAudio>; // stream.id -> áudio
+  videos: Map<string, MediaStream>; // stream.id -> tela ou câmera
+  /** stream.id da câmera do outro lado (avisado por sinal 'streams'); o resto é tela. */
+  cameraId: string | null;
   screenSenders: RTCRtpSender[];
-  analyser: AnalyserNode | null;
+  cameraSenders: RTCRtpSender[];
   speaking: boolean;
   queue: Promise<void>; // sinais processados em ordem, um de cada vez
   watchdog: number;
@@ -54,6 +80,7 @@ export class CallSession {
   muted = false;
   deafened = false;
   screen: MediaStream | null = null;
+  camera: MediaStream | null = null;
   localSpeaking = false;
   /** Entrou sem microfone: só ouve. */
   noMic = false;
@@ -65,8 +92,11 @@ export class CallSession {
   private gw: GatewayClient;
   private myConnectionId: string;
   private mic: MediaStream | null = null;
+  /** O que realmente vai para os outros (mic com volume e gate). */
+  private send: MediaStream | null = null;
+  private micProc: MicProcessor | null = null;
   private peers = new Map<string, Peer>();
-  private speakerId: string | undefined;
+  private opts!: CallOptions;
   private audioCtx = new AudioContext();
   private localAnalyser: AnalyserNode | null = null;
   private vadTimer = 0;
@@ -79,25 +109,37 @@ export class CallSession {
   }
 
   /** Sem microfone a call continua funcionando só para ouvir (e ver/transmitir tela). Devolve o erro do microfone, se houve. */
-  async start(micId?: string, speakerId?: string): Promise<Error | null> {
-    this.speakerId = speakerId;
+  async start(opts: CallOptions): Promise<Error | null> {
+    this.opts = opts;
+    if (opts.playback === 'webaudio' && opts.speakerId) {
+      const ctx = this.audioCtx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+      await ctx.setSinkId?.(opts.speakerId).catch((e) => console.warn('[rtc] saída', e));
+    }
     let micError: Error | null = null;
     try {
       this.mic = await navigator.mediaDevices.getUserMedia({
         audio: {
-          deviceId: micId ? { ideal: micId } : undefined,
+          deviceId: opts.micId ? { ideal: opts.micId } : undefined,
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
           channelCount: 1,
         },
       });
-      this.localAnalyser = this.analyse(this.mic);
+      try {
+        this.micProc = await MicProcessor.create(this.audioCtx, this.mic, opts.mic);
+        this.send = this.micProc.output;
+      } catch (e) {
+        console.warn('[rtc] mic sem tratamento', e);
+        this.send = this.mic;
+      }
+      if (!this.micProc?.hasGate) this.localAnalyser = this.analyse(this.mic);
     } catch (e) {
       micError = e as Error;
       this.noMic = true;
       this.muted = true;
     }
+    if (this.audioCtx.state === 'suspended') this.audioCtx.resume().catch(() => {});
     this.vadTimer = window.setInterval(() => this.detectSpeaking(), 150);
     this.ready = true;
     return micError;
@@ -108,9 +150,21 @@ export class CallSession {
       connectionId,
       userId: p.userId,
       state: p.pc.connectionState,
-      screen: p.screen,
+      screen: [...p.videos.values()].find((v) => v.id !== p.cameraId) ?? null,
+      camera: (p.cameraId && p.videos.get(p.cameraId)) || null,
       speaking: p.speaking,
     }));
+  }
+
+  /** Mudou volume/sensibilidade do meu microfone nas Configurações. */
+  setMicSettings(s: MicSettings): void {
+    this.opts.mic = s;
+    this.micProc?.set(s);
+  }
+
+  /** Reaplica os volumes de cada pessoa (mudou algum controle). */
+  refreshVolumes(): void {
+    for (const p of this.peers.values()) this.applyVolumes(p);
   }
 
   /** Sincroniza os peers com a lista de participantes vinda do servidor. */
@@ -137,6 +191,11 @@ export class CallSession {
   private async applySignal(peer: Peer, fromConnectionId: string, signal: RtcSignal): Promise<void> {
     if (this.closed || this.peers.get(fromConnectionId) !== peer) return;
     log('recv', signal.type, 'de', fromConnectionId.slice(-4));
+    if (signal.type === 'streams') {
+      peer.cameraId = signal.camera;
+      this.onChange();
+      return;
+    }
     const pc = peer.pc;
     try {
       if (signal.type === 'candidate') {
@@ -171,7 +230,7 @@ export class CallSession {
   /** Deafen: não ouve ninguém e também não fala (como no Discord). */
   setDeafened(deafened: boolean): void {
     this.deafened = deafened;
-    for (const p of this.peers.values()) for (const el of p.audioEls.values()) el.muted = deafened;
+    this.refreshVolumes();
     this.setMuted(this.muted);
   }
 
@@ -203,14 +262,49 @@ export class CallSession {
     this.screenCfg = null;
     // Remove as tracks da tela (vídeo e, no Windows, o áudio do sistema) → renegocia.
     for (const peer of this.peers.values()) {
-      for (const sender of peer.screenSenders) {
-        try {
-          peer.pc.removeTrack(sender);
-        } catch {
-          /* peer já fechado */
-        }
-      }
+      removeSenders(peer.pc, peer.screenSenders);
       peer.screenSenders = [];
+    }
+    this.onChange();
+  }
+
+  async startCamera(deviceId?: string): Promise<void> {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        deviceId: deviceId ? { ideal: deviceId } : undefined,
+        facingMode: deviceId ? undefined : 'user',
+        width: { ideal: CAMERA.width },
+        height: { ideal: CAMERA.height },
+        frameRate: { ideal: CAMERA.fps, max: CAMERA.fps },
+      },
+    });
+    if (this.closed) {
+      for (const t of stream.getTracks()) t.stop();
+      return;
+    }
+    this.stopCamera();
+    this.camera = stream;
+    const track = stream.getVideoTracks()[0];
+    track.contentHint = 'motion';
+    track.addEventListener('ended', () => {
+      if (this.camera === stream) this.stopCamera();
+    });
+    for (const [connId, peer] of this.peers) {
+      // Avisa antes da offer qual stream é a câmera (os sinais chegam em ordem).
+      this.signal(connId, { type: 'streams', camera: stream.id });
+      this.attachCamera(peer);
+    }
+    this.onChange();
+  }
+
+  stopCamera(): void {
+    if (!this.camera) return;
+    for (const t of this.camera.getTracks()) t.stop();
+    this.camera = null;
+    for (const [connId, peer] of this.peers) {
+      removeSenders(peer.pc, peer.cameraSenders);
+      peer.cameraSenders = [];
+      this.signal(connId, { type: 'streams', camera: null });
     }
     this.onChange();
   }
@@ -221,6 +315,7 @@ export class CallSession {
     for (const id of [...this.peers.keys()]) this.closePeer(id);
     for (const t of this.mic?.getTracks() ?? []) t.stop();
     for (const t of this.screen?.getTracks() ?? []) t.stop();
+    for (const t of this.camera?.getTracks() ?? []) t.stop();
     this.audioCtx.close();
   }
 
@@ -238,10 +333,11 @@ export class CallSession {
       polite: this.myConnectionId > connectionId,
       makingOffer: false,
       ignoreOffer: false,
-      audioEls: new Map(),
-      screen: null,
+      audios: new Map(),
+      videos: new Map(),
+      cameraId: null,
       screenSenders: [],
-      analyser: null,
+      cameraSenders: [],
       speaking: false,
       queue: Promise.resolve(),
       watchdog: 0,
@@ -277,29 +373,79 @@ export class CallSession {
     pc.ontrack = ({ track, streams }) => {
       const stream = streams[0] ?? new MediaStream([track]);
       if (track.kind === 'video') {
-        peer.screen = stream;
+        peer.videos.set(stream.id, stream);
         stream.onremovetrack = () => {
-          if (!stream.getVideoTracks().length) peer.screen = null;
+          if (!stream.getVideoTracks().length) peer.videos.delete(stream.id);
+          this.applyVolumes(peer);
           this.onChange();
         };
-      } else if (!peer.audioEls.has(stream.id)) {
-        // Um <audio> por stream: voz e áudio do sistema da tela tocam separados.
-        const el = new Audio();
-        el.srcObject = stream;
-        el.muted = this.deafened;
-        if (this.speakerId) el.setSinkId(this.speakerId).catch(() => {});
-        el.play().catch((e) => console.warn('[rtc] play', e));
-        peer.audioEls.set(stream.id, el);
-        if (!peer.analyser) peer.analyser = this.analyse(stream);
+      } else if (!peer.audios.has(stream.id)) {
+        // Um áudio por stream: voz e áudio do sistema da tela têm volumes separados.
+        peer.audios.set(stream.id, this.playRemote(stream));
       }
+      // A tela (vídeo + áudio do PC) vem numa stream só: o vídeo define que esse áudio é "da tela".
+      this.applyVolumes(peer);
       this.onChange();
     };
 
-    for (const t of this.mic?.getTracks() ?? []) pc.addTrack(t, this.mic!);
+    for (const t of this.send?.getTracks() ?? []) pc.addTrack(t, this.send!);
     // Sem microfone não há o que enviar e a negociação nem começaria: pede só para receber o áudio.
-    if (!this.mic) pc.addTransceiver('audio', { direction: 'recvonly' });
+    if (!this.send) pc.addTransceiver('audio', { direction: 'recvonly' });
     if (this.screen && this.screenCfg) this.attachScreen(peer, this.screenCfg.bitrate, this.screenCfg.fps);
+    if (this.camera) {
+      this.signal(connectionId, { type: 'streams', camera: this.camera.id });
+      this.attachCamera(peer);
+    }
     return peer;
+  }
+
+  private playRemote(stream: MediaStream): RemoteAudio {
+    const el = new Audio();
+    el.srcObject = stream;
+    let gain: GainNode | null = null;
+    let analyser: AnalyserNode | null = null;
+    try {
+      const src = this.audioCtx.createMediaStreamSource(stream);
+      analyser = this.audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      src.connect(analyser);
+      if (this.opts.playback === 'webaudio') {
+        // Toca pelo AudioContext (permite passar de 100%). O <audio> mudo continua
+        // necessário: sem ele o Chromium não entrega o áudio remoto ao WebAudio.
+        gain = this.audioCtx.createGain();
+        src.connect(gain).connect(this.audioCtx.destination);
+        el.muted = true;
+      }
+    } catch (e) {
+      console.warn('[rtc] webaudio remoto', e);
+    }
+    if (!gain && this.opts.speakerId) el.setSinkId(this.opts.speakerId).catch(() => {});
+    el.play().catch((e) => console.warn('[rtc] play', e));
+    return { stream, el, gain, analyser };
+  }
+
+  private applyVolumes(peer: Peer): void {
+    for (const a of peer.audios.values()) {
+      const kind: AudioKind = a.stream.getVideoTracks().length ? 'screen' : 'voice';
+      const v = this.deafened ? 0 : Math.max(0, this.opts.volumeOf(peer.userId, kind));
+      if (a.gain) a.gain.gain.value = v;
+      else {
+        a.el.volume = Math.min(1, v);
+        a.el.muted = this.deafened;
+      }
+    }
+  }
+
+  private attachCamera(peer: Peer): void {
+    const stream = this.camera!;
+    for (const track of stream.getVideoTracks()) {
+      const tr = peer.pc.addTransceiver(track, {
+        direction: 'sendonly',
+        streams: [stream],
+        sendEncodings: [{ maxBitrate: CAMERA.bitrate, maxFramerate: CAMERA.fps }],
+      });
+      peer.cameraSenders.push(tr.sender);
+    }
   }
 
   private attachScreen(peer: Peer, bitrate: number, fps: number): void {
@@ -333,9 +479,10 @@ export class CallSession {
     if (!p) return;
     clearTimeout(p.watchdog);
     p.pc.close();
-    for (const el of p.audioEls.values()) {
-      el.pause();
-      el.srcObject = null;
+    for (const a of p.audios.values()) {
+      a.el.pause();
+      a.el.srcObject = null;
+      a.gain?.disconnect();
     }
     this.peers.delete(connectionId);
   }
@@ -358,16 +505,33 @@ export class CallSession {
   }
 
   private detectSpeaking(): void {
-    const local = !!this.localAnalyser && !this.muted && !this.deafened && level(this.localAnalyser) > SPEAKING_THRESHOLD;
+    const heard = this.micProc?.hasGate ? this.micProc.speaking : !!this.localAnalyser && level(this.localAnalyser) > SPEAKING_THRESHOLD;
+    const local = heard && !this.muted && !this.deafened;
     let changed = local !== this.localSpeaking;
     this.localSpeaking = local;
     for (const p of this.peers.values()) {
-      const speaking = !!p.analyser && !this.deafened && level(p.analyser) > SPEAKING_THRESHOLD;
+      // Só a voz conta (o áudio do jogo/vídeo da tela não acende o "falando").
+      let speaking = false;
+      if (!this.deafened) {
+        for (const a of p.audios.values()) {
+          if (a.analyser && !a.stream.getVideoTracks().length && level(a.analyser) > SPEAKING_THRESHOLD) speaking = true;
+        }
+      }
       if (speaking !== p.speaking) changed = true;
       p.speaking = speaking;
     }
     // Só redesenha quando alguém começa/para de falar.
     if (changed) this.onChange();
+  }
+}
+
+function removeSenders(pc: RTCPeerConnection, senders: RTCRtpSender[]): void {
+  for (const sender of senders) {
+    try {
+      pc.removeTrack(sender);
+    } catch {
+      /* peer já fechado */
+    }
   }
 }
 

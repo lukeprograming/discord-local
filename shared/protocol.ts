@@ -58,7 +58,9 @@ export type IceCandidate = {
 
 export type RtcSignal =
   | { type: 'offer' | 'answer'; sdp: string }
-  | { type: 'candidate'; candidate: IceCandidate | null };
+  | { type: 'candidate'; candidate: IceCandidate | null }
+  /** Diz qual stream é a câmera (o resto do vídeo é tela). */
+  | { type: 'streams'; camera: string | null };
 
 export type ReadyPayload = {
   connection_id: string;

@@ -8,8 +8,10 @@ type Mode = 'login' | 'register';
 export function Setup() {
   const profile = useApp((s) => s.profile);
   const embedded = useApp((s) => s.embedded);
+  // No celular não dá para ser host: vai direto para conectar.
+  const clientOnly = useApp((s) => s.platform === 'android');
   const [path, setPath] = useState<'choose' | 'host' | 'client'>(
-    profile?.role === 'host' ? 'host' : profile || embedded ? 'client' : 'choose',
+    profile?.role === 'host' ? 'host' : profile || embedded || clientOnly ? 'client' : 'choose',
   );
 
   return (
@@ -32,7 +34,7 @@ export function Setup() {
           </>
         )}
         {path === 'host' && <HostSetup onBack={profile ? undefined : () => setPath('choose')} />}
-        {path === 'client' && <ClientSetup onBack={profile || embedded ? undefined : () => setPath('choose')} />}
+        {path === 'client' && <ClientSetup onBack={profile || embedded || clientOnly ? undefined : () => setPath('choose')} />}
       </div>
     </div>
   );

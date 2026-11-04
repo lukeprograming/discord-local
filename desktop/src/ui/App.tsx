@@ -19,7 +19,7 @@ export function App() {
   const stage = sharing ? s.stage : 'normal';
 
   return (
-    <div className={`layout stage-${stage}`}>
+    <div className={`layout stage-${stage} ${selected ? 'has-selection' : ''}`}>
       {stage !== 'theater' && <Sidebar />}
       <main className="main">
         {selected ? (

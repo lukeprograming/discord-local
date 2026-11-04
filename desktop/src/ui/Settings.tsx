@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
-import { app, errorMessage, useApp } from '../app.ts';
+import { useEffect, useRef, useState } from 'react';
+import { app, errorMessage, micSettings, useApp } from '../app.ts';
+import { MicProcessor } from '../mic.ts';
 import { UpdateSection } from './Update.tsx';
 import type { NetInterface } from '../native.d.ts';
 
 export function Settings({ onClose }: { onClose: () => void }) {
   const profile = useApp((s) => s.profile)!;
+  const mobile = useApp((s) => s.platform === 'android');
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
 
   useEffect(() => {
@@ -18,6 +20,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
 
   const inputs = devices.filter((d) => d.kind === 'audioinput');
   const outputs = devices.filter((d) => d.kind === 'audiooutput');
+  const cameras = devices.filter((d) => d.kind === 'videoinput');
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -41,7 +44,19 @@ export function Settings({ onClose }: { onClose: () => void }) {
             ))}
           </select>
         </label>
-        <p className="muted small">Mudanças de dispositivo valem a partir da próxima call.</p>
+        <MicSection />
+        {cameras.length > 0 && (
+          <label>
+            Câmera
+            <select value={profile.settings?.camera_id ?? ''} onChange={(e) => app.saveSettings({ camera_id: e.target.value || undefined })}>
+              <option value="">{mobile ? 'Frontal' : 'Padrão do sistema'}</option>
+              {cameras.map((d, i) => (
+                <option key={d.deviceId} value={d.deviceId}>{d.label || `Câmera ${i + 1}`}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <p className="muted small">Trocar de dispositivo vale a partir da próxima call (volume e sensibilidade valem na hora).</p>
         <hr />
         {profile.role === 'host' ? <HostSection /> : (
           <p className="small">
@@ -51,14 +66,114 @@ export function Settings({ onClose }: { onClose: () => void }) {
         <hr />
         <UpdateSection />
         <hr />
-        <p className="small muted">Seu histórico fica salvo neste computador, na pasta de dados do app.</p>
+        <p className="small muted">Seu histórico fica salvo neste {mobile ? 'celular' : 'computador'}, na pasta de dados do app.</p>
         <div className="modal-actions">
-          <button onClick={() => window.native.openDataDir()}>Abrir pasta de dados</button>
+          {!mobile && <button onClick={() => window.native.openDataDir()}>Abrir pasta de dados</button>}
           <button className="danger" onClick={() => { onClose(); app.logout(); }}>Sair da conta</button>
           <button className="primary" onClick={onClose}>Fechar</button>
         </div>
       </div>
     </div>
+  );
+}
+
+const DB_MIN = -80;
+
+/** Volume e sensibilidade do microfone, com medidor ao vivo para achar o ponto certo. */
+function MicSection() {
+  const settings = useApp((s) => s.profile?.settings);
+  const mic = micSettings(settings);
+  const auto = mic.threshold === null;
+  const [level, setLevel] = useState({ db: -100, open: true });
+  const [error, setError] = useState('');
+  const procRef = useRef<MicProcessor | null>(null);
+
+  // Captura própria só para o medidor (nada é enviado nem tocado).
+  useEffect(() => {
+    let stopped = false;
+    let stream: MediaStream | null = null;
+    const ctx = new AudioContext();
+    navigator.mediaDevices
+      .getUserMedia({
+        audio: {
+          deviceId: settings?.mic_id ? { ideal: settings.mic_id } : undefined,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+      })
+      .then(async (st) => {
+        stream = st;
+        if (stopped) return;
+        const proc = await MicProcessor.create(ctx, st, micSettings(app.state.profile?.settings));
+        if (stopped) return;
+        procRef.current = proc;
+        if (!proc.hasGate) setError('Este aparelho não suporta o ajuste de sensibilidade.');
+        proc.onLevel = (db, open) => setLevel({ db, open });
+      })
+      .catch((e) => setError(`Sem microfone para testar: ${(e as Error).message}`));
+    return () => {
+      stopped = true;
+      procRef.current = null;
+      for (const t of stream?.getTracks() ?? []) t.stop();
+      ctx.close();
+    };
+  }, [settings?.mic_id]);
+
+  useEffect(() => {
+    procRef.current?.set(mic);
+  }, [mic.volume, mic.threshold]);
+
+  const pct = (db: number) => `${Math.max(0, Math.min(100, ((db - DB_MIN) / -DB_MIN) * 100))}%`;
+  const threshold = mic.threshold ?? -50;
+
+  return (
+    <>
+      <label>
+        Volume do microfone <small className="muted">{Math.round(mic.volume * 100)}%</small>
+        <input
+          type="range"
+          min={0}
+          max={200}
+          step={5}
+          value={Math.round(mic.volume * 100)}
+          onChange={(e) => app.saveMicSettings({ mic_volume: Number(e.target.value) / 100 })}
+        />
+      </label>
+      <div className="mic-sensitivity">
+        <span>Sensibilidade do microfone</span>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={auto}
+            onChange={(e) => app.saveMicSettings({ mic_threshold: e.target.checked ? null : threshold })}
+          />
+          Automática <small className="muted">(transmite sempre; o filtro de ruído do app limpa o fundo)</small>
+        </label>
+        <div className={`meter ${auto ? 'auto' : ''}`}>
+          <div className={`meter-level ${level.open ? 'open' : ''}`} style={{ width: pct(level.db) }} />
+          {!auto && <div className="meter-mark" style={{ left: pct(threshold) }} />}
+        </div>
+        {!auto && (
+          <>
+            <input
+              type="range"
+              min={DB_MIN}
+              max={0}
+              step={1}
+              value={threshold}
+              onChange={(e) => app.saveMicSettings({ mic_threshold: Number(e.target.value) })}
+            />
+            <small className="muted">
+              {threshold} dB — fale normalmente: a barra deve ficar verde só quando você fala. Mais para a direita = precisa falar mais
+              alto para ser ouvido.
+            </small>
+          </>
+        )}
+        {error && <small className="muted">{error}</small>}
+      </div>
+    </>
   );
 }
 

@@ -20,9 +20,10 @@ export function Chat({ conversation }: { conversation: Conversation }) {
   const typing = app.typingUsers(conversation.id);
   const call = s.calls[conversation.id];
   const inCall = s.call?.conversationId === conversation.id;
+  const mobile = s.platform === 'android';
 
   useEffect(() => {
-    inputRef.current?.focus();
+    if (!mobile) inputRef.current?.focus(); // no celular abriria o teclado por cima da conversa
     stickToBottom.current = true;
   }, [conversation.id]);
 
@@ -32,19 +33,25 @@ export function Chat({ conversation }: { conversation: Conversation }) {
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages.length, conversation.id]);
 
+  function submit() {
+    if (!text.trim()) return;
+    app.send(conversation.id, text);
+    setText('');
+    stickToBottom.current = true;
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // No celular o Enter do teclado quebra linha; envia pelo botão.
+    if (e.key === 'Enter' && !e.shiftKey && !mobile) {
       e.preventDefault();
-      if (!text.trim()) return;
-      app.send(conversation.id, text);
-      setText('');
-      stickToBottom.current = true;
+      submit();
     }
   }
 
   return (
     <section className="chat">
       <header className="chat-header">
+        <button className="icon back-btn" title="Voltar" onClick={() => app.select(null)}>←</button>
         {peer ? <Avatar user={peer} online={s.presences[peer.id] === 'ONLINE'} /> : <span className="avatar group-avatar">#</span>}
         <div className="chat-title">
           <strong>{app.conversationTitle(conversation)}</strong>
@@ -108,6 +115,7 @@ export function Chat({ conversation }: { conversation: Conversation }) {
       </div>
 
       <div className="composer">
+        <div className="composer-row">
         <textarea
           ref={inputRef}
           rows={1}
@@ -119,6 +127,12 @@ export function Chat({ conversation }: { conversation: Conversation }) {
           }}
           onKeyDown={onKeyDown}
         />
+        {mobile && (
+          <button className="send-btn" title="Enviar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()} onClick={submit}>
+            ➤
+          </button>
+        )}
+        </div>
         <div className="typing">
           {typing.length > 0 && `${typing.map((u) => u.display_name).join(', ')} está digitando…`}
         </div>

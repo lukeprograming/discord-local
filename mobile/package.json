@@ -1,0 +1,23 @@
+{
+  "name": "discord-local-mobile",
+  "private": true,
+  "description": "Discord Local para Android (mesma interface do desktop, via Capacitor)",
+  "scripts": {
+    "build": "vite build && cap sync android",
+    "check": "tsc --noEmit",
+    "apk": "npm run build && cd android && ./gradlew assembleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.2",
+    "@capacitor/app": "^6.0.3",
+    "@capacitor/core": "^6.2.2",
+    "@capacitor/filesystem": "^6.0.4",
+    "@capacitor/local-notifications": "^6.1.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.2",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  }
+}

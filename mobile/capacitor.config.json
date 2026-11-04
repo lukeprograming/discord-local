@@ -1,0 +1,8 @@
+{
+  "appId": "local.discord.app",
+  "appName": "Discord Local",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http"
+  }
+}

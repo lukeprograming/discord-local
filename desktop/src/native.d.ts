@@ -31,7 +31,20 @@ export type Profile = {
   token: string;
   user: UserPublic;
   cache: { friends: Friend[]; conversations: Conversation[] };
-  settings?: { mic_id?: string; speaker_id?: string; screen_preset?: string };
+  settings?: Settings;
+};
+
+export type Settings = {
+  mic_id?: string;
+  speaker_id?: string;
+  camera_id?: string;
+  screen_preset?: string;
+  /** Volume do meu microfone (1 = 100%). */
+  mic_volume?: number;
+  /** Sensibilidade em dB: abaixo disso os outros não me ouvem. Ausente = automático (sempre aberto). */
+  mic_threshold?: number | null;
+  /** Volume que eu escolhi para cada pessoa: voz e áudio da transmissão de tela. */
+  user_volumes?: Record<string, { voice?: number; screen?: number }>;
 };
 
 export type ScreenSource = { id: string; name: string; thumbnail: string; isScreen: boolean };
@@ -62,6 +75,12 @@ declare global {
       updateDownload(): Promise<void>;
       updateInstall(): Promise<void>;
       onUpdateStatus(cb: (s: UpdateStatus) => void): () => void;
+      // Só no Android:
+      notify?(title: string, body: string): Promise<void>;
+      /** Mantém o app vivo com o microfone em segundo plano enquanto está na call. */
+      callActive?(active: boolean): Promise<void>;
+      /** Alto-falante (true) ou fone de ouvido do celular (false). */
+      setSpeaker?(on: boolean): Promise<void>;
     };
   }
 }

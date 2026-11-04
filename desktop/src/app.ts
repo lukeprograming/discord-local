@@ -9,9 +9,14 @@ import type {
 } from '../../shared/protocol.ts';
 import { MAX_MESSAGE_LENGTH } from '../../shared/protocol.ts';
 import { GatewayClient, httpPost } from './gateway.ts';
-import { CallSession, type ScreenPreset } from './rtc.ts';
+import { CallSession, type AudioKind, type ScreenPreset } from './rtc.ts';
+import type { MicSettings } from './mic.ts';
 import { ulid } from './ulid.ts';
-import type { EmbeddedConfig, HostConfig, HostStatus, Profile, UpdateStatus } from './native.d.ts';
+import type { EmbeddedConfig, HostConfig, HostStatus, Profile, Settings, UpdateStatus } from './native.d.ts';
+
+export function micSettings(s: Settings | undefined): MicSettings {
+  return { volume: s?.mic_volume ?? 1, threshold: s?.mic_threshold ?? null };
+}
 
 /** Erros vindos do processo principal chegam com prefixo do Electron. */
 export function errorMessage(e: unknown): string {
@@ -19,10 +24,12 @@ export function errorMessage(e: unknown): string {
 }
 
 /** Traduz o erro do getUserMedia para algo que dá pra resolver. */
-function micErrorMessage(e: Error): string {
+function micErrorMessage(e: Error, platform: string): string {
   switch (e.name) {
     case 'NotAllowedError':
-      return 'Sem permissão para usar o microfone. No Windows: Configurações → Privacidade → Microfone → permitir apps da área de trabalho.';
+      return platform === 'android'
+        ? 'Sem permissão para usar o microfone. Libere em Configurações do Android → Apps → Discord Local → Permissões.'
+        : 'Sem permissão para usar o microfone. No Windows: Configurações → Privacidade → Microfone → permitir apps da área de trabalho.';
     case 'NotFoundError':
       return 'Nenhum microfone encontrado. Conecte ou ative um microfone e tente de novo.';
     case 'NotReadableError':
@@ -57,6 +64,8 @@ export type State = {
   /** Tamanho da transmissão: normal (divide com o chat), wide (sem chat), theater (sem chat nem lateral). */
   stage: 'normal' | 'wide' | 'theater';
   update: UpdateStatus;
+  /** Celular: som da call no alto-falante (senão no fone de ouvido). */
+  speaker: boolean;
 };
 
 type Listener = () => void;
@@ -88,6 +97,7 @@ class App {
     hostBusy: false,
     stage: 'normal',
     update: { state: 'idle', current: '' },
+    speaker: true,
   };
 
   private listeners = new Set<Listener>();
@@ -253,7 +263,7 @@ class App {
     const url = serverUrl.trim().replace(/\/$/, '');
     const res = await httpPost<{ token: string; user: UserPublic }>(url, `/auth/${mode}`, {
       ...body,
-      device_name: `desktop-${this.state.platform}`,
+      device_name: this.state.platform === 'android' ? 'android' : `desktop-${this.state.platform}`,
     });
     const prev = this.state.profile;
     // Mesmo usuário no mesmo servidor: mantém cache e configurações.
@@ -387,6 +397,11 @@ class App {
   }
 
   private notify(title: string, body: string): void {
+    if (window.native.notify) {
+      // Celular: com o app aberto na frente, a própria tela já mostra.
+      if (document.hidden) window.native.notify(title, body);
+      return;
+    }
     window.native.flash();
     if (document.hasFocus()) return;
     try {
@@ -398,7 +413,9 @@ class App {
 
   // ---- conversas / mensagens ----
 
-  async select(conversationId: string): Promise<void> {
+  /** null volta para a lista (no celular a conversa ocupa a tela toda). */
+  async select(conversationId: string | null): Promise<void> {
+    if (!conversationId) return this.set({ selected: null });
     const unread = { ...this.state.unread };
     delete unread[conversationId];
     this.set({ selected: conversationId, unread });
@@ -547,15 +564,24 @@ class App {
     session.onScreenEnded = () => this.pushCallState();
     this.set({ call: session, ringing: null, callError: null });
     const s = this.state.profile?.settings;
-    const micError = await session.start(s?.mic_id, s?.speaker_id);
+    const micError = await session.start({
+      micId: s?.mic_id,
+      speakerId: s?.speaker_id,
+      mic: micSettings(s),
+      playback: this.state.platform === 'android' ? 'element' : 'webaudio',
+      volumeOf: (userId, kind) => this.userVolume(userId, kind),
+    });
+    // Depois do microfone: o Android só deixa o serviço usar o mic se a permissão já foi dada.
+    window.native.callActive?.(true);
     if (micError) {
-      const msg = `${micErrorMessage(micError)} Você entrou só para ouvir.`;
+      const msg = `${micErrorMessage(micError, this.state.platform)} Você entrou só para ouvir.`;
       this.set({ callError: msg });
       this.toast(msg);
     }
     await gw.request('call.join', { conversation_id: conversationId });
     // Os outros veem que estou mutado (sem microfone).
     if (session.noMic) this.pushCallState();
+    if (window.native.setSpeaker) this.setSpeaker(this.state.speaker);
     // Se o call.update chegou antes do microfone ficar pronto, sincroniza agora.
     const info = this.state.calls[conversationId];
     if (info) session.sync(info);
@@ -565,8 +591,14 @@ class App {
     const s = this.state.call;
     if (!s) return;
     s.close();
+    window.native.callActive?.(false);
     if (notify) this.gw?.emit('call.leave', { conversation_id: s.conversationId });
     this.set({ call: null, stage: 'normal' });
+  }
+
+  setSpeaker(on: boolean): void {
+    this.set({ speaker: on });
+    window.native.setSpeaker?.(on).catch((e) => this.toast(errorMessage(e)));
   }
 
   declineCall(): void {
@@ -598,6 +630,55 @@ class App {
     if (!s) return;
     s.setDeafened(!s.deafened);
     this.pushCallState();
+  }
+
+  /** Volume (1 = 100%) que eu escolhi para a voz ou a transmissão dessa pessoa. */
+  userVolume(userId: string, kind: AudioKind): number {
+    return this.state.profile?.settings?.user_volumes?.[userId]?.[kind] ?? 1;
+  }
+
+  /** Aplica na hora; salva no disco um pouco depois (o slider dispara muitas vezes). */
+  setUserVolume(userId: string, kind: AudioKind, volume: number): void {
+    const p = this.state.profile;
+    if (!p) return;
+    const all = { ...p.settings?.user_volumes };
+    all[userId] = { ...all[userId], [kind]: volume };
+    this.state.profile = { ...p, settings: { ...p.settings, user_volumes: all } };
+    this.state.call?.refreshVolumes();
+    this.bump();
+    clearTimeout(this.volumeSaveTimer);
+    this.volumeSaveTimer = window.setTimeout(() => this.state.profile && window.native.saveProfile(this.state.profile), 400);
+  }
+  private volumeSaveTimer = 0;
+
+  /** Volume/sensibilidade do meu microfone: vale na hora, inclusive dentro da call. */
+  async saveMicSettings(patch: Pick<Settings, 'mic_volume' | 'mic_threshold'>): Promise<void> {
+    await this.saveSettings(patch);
+    this.state.call?.setMicSettings(micSettings(this.state.profile?.settings));
+  }
+
+  async toggleCamera(): Promise<void> {
+    const s = this.state.call;
+    if (!s) return;
+    if (s.camera) {
+      s.stopCamera();
+      return this.bump();
+    }
+    try {
+      await s.startCamera(this.state.profile?.settings?.camera_id);
+    } catch (e) {
+      const err = e as Error;
+      this.toast(
+        err.name === 'NotAllowedError'
+          ? 'Sem permissão para usar a câmera.'
+          : err.name === 'NotFoundError'
+            ? 'Nenhuma câmera encontrada.'
+            : err.name === 'NotReadableError'
+              ? 'A câmera está ocupada por outro programa.'
+              : `Não consegui abrir a câmera: ${err.message}`,
+      );
+    }
+    this.bump();
   }
 
   async startScreen(preset: ScreenPreset, withAudio: boolean, hint: 'detail' | 'motion'): Promise<void> {

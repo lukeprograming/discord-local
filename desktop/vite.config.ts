@@ -4,5 +4,6 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   base: './', // o app é carregado via file:// no Electron
   plugins: [react()],
-  build: { outDir: 'dist', emptyOutDir: true },
+  // O worklet do noise gate precisa ser arquivo de verdade: o CSP bloqueia data: em script.
+  build: { outDir: 'dist', emptyOutDir: true, assetsInlineLimit: (file) => (file.endsWith('.js') ? false : undefined) },
 });
