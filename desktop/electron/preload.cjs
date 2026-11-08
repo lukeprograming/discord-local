@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('native', {
   info: () => ipcRenderer.invoke('app:info'),
   flash: () => ipcRenderer.invoke('app:flash'),
   focusMain: () => ipcRenderer.invoke('app:focus'),
+  idleSeconds: () => ipcRenderer.invoke('app:idle'),
   onChooseScreen: (cb) => {
     const listener = (_e, sources) => cb(sources);
     ipcRenderer.on('screen:choose', listener);

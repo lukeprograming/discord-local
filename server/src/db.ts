@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { Conversation, Friend, FriendStatus, Message, UserPublic } from '../../shared/protocol.ts';
+import type { Conversation, Friend, FriendStatus, Message, Sound, UserPublic, UserStatus } from '../../shared/protocol.ts';
 import { ulid } from './ids.ts';
 
 const SCHEMA = `
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS friendships (
 );
 CREATE TABLE IF NOT EXISTS conversations (
   id         TEXT PRIMARY KEY,
-  type       TEXT NOT NULL,              -- DIRECT | GROUP
+  type       TEXT NOT NULL,              -- DIRECT | GROUP | ROOM
   name       TEXT,
   owner_id   TEXT,
   direct_key TEXT UNIQUE,                -- "low:high" nas DIRECT
@@ -79,6 +79,15 @@ CREATE TABLE IF NOT EXISTS files (
   mime            TEXT NOT NULL,
   created_at      INTEGER NOT NULL,
   attached        INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS sounds (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  emoji       TEXT NOT NULL,
+  uploader_id TEXT NOT NULL,
+  mime        TEXT NOT NULL,
+  size        INTEGER NOT NULL,
+  created_at  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS file_pending (
   file_id TEXT NOT NULL,
@@ -125,6 +134,107 @@ export class Db {
         UPDATE invites SET uses = 1 WHERE used_by IS NOT NULL;
       `);
     }
+    const ucols = (this.db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
+    if (!ucols.includes('status_text')) {
+      this.db.exec(`
+        ALTER TABLE users ADD COLUMN status_text TEXT NOT NULL DEFAULT '';
+        ALTER TABLE users ADD COLUMN status_emoji TEXT NOT NULL DEFAULT '';
+        ALTER TABLE users ADD COLUMN availability TEXT NOT NULL DEFAULT 'online';
+      `);
+    }
+    this.ensureDefaultRoom();
+  }
+
+  // ---- salas fixas (todo mundo participa) ----
+
+  /** Servidor sem sala: cria a "Sala geral" com todos os usuários. */
+  private ensureDefaultRoom(): void {
+    if (this.db.prepare("SELECT 1 FROM conversations WHERE type = 'ROOM' LIMIT 1").get()) return;
+    const id = ulid();
+    const now = Date.now();
+    this.db.prepare("INSERT INTO conversations (id, type, name, created_at) VALUES (?, 'ROOM', 'Sala geral', ?)").run(id, now);
+    this.db.prepare('INSERT INTO conversation_members (conversation_id, user_id, joined_at) SELECT ?, id, ? FROM users').run(id, now);
+  }
+
+  createRoom(name: string): Conversation {
+    const id = ulid();
+    const now = Date.now();
+    this.db.prepare("INSERT INTO conversations (id, type, name, created_at) VALUES (?, 'ROOM', ?, ?)").run(id, name, now);
+    this.db.prepare('INSERT INTO conversation_members (conversation_id, user_id, joined_at) SELECT ?, id, ? FROM users').run(id, now);
+    return this.conversation(id)!;
+  }
+
+  renameRoom(id: string, name: string): Conversation | undefined {
+    this.db.prepare("UPDATE conversations SET name = ? WHERE id = ? AND type = 'ROOM'").run(name, id);
+    return this.conversation(id);
+  }
+
+  /** Apaga a sala (o histórico de cada um continua no próprio PC). Devolve quem era membro. */
+  deleteRoom(id: string): string[] {
+    const members = this.memberIds(id);
+    this.db.prepare('DELETE FROM conversation_members WHERE conversation_id = ?').run(id);
+    this.db.prepare("DELETE FROM conversations WHERE id = ? AND type = 'ROOM'").run(id);
+    return members;
+  }
+
+  roomIds(): string[] {
+    return (this.db.prepare("SELECT id FROM conversations WHERE type = 'ROOM'").all() as { id: string }[]).map((r) => r.id);
+  }
+
+  /** Quem me interessa saber se está online: amigos + quem divide conversa comigo (salas). */
+  contactIds(userId: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT m2.user_id AS id FROM conversation_members m1
+           JOIN conversation_members m2 ON m2.conversation_id = m1.conversation_id
+          WHERE m1.user_id = ? AND m2.user_id != ?`,
+      )
+      .all(userId, userId) as { id: string }[];
+    return [...new Set([...rows.map((r) => r.id), ...this.acceptedFriendIds(userId)])];
+  }
+
+  // ---- status ----
+
+  status(userId: string): UserStatus {
+    const r = this.db.prepare('SELECT status_text, status_emoji, availability FROM users WHERE id = ?').get(userId) as
+      | { status_text: string; status_emoji: string; availability: string }
+      | undefined;
+    const a = r?.availability;
+    return { availability: a === 'idle' || a === 'dnd' ? a : 'online', text: r?.status_text ?? '', emoji: r?.status_emoji ?? '' };
+  }
+
+  setStatus(userId: string, s: UserStatus): void {
+    this.db.prepare('UPDATE users SET status_text = ?, status_emoji = ?, availability = ? WHERE id = ?').run(s.text, s.emoji, s.availability, userId);
+  }
+
+  isAdminId(userId: string): boolean {
+    return !!(this.db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId) as { is_admin: number } | undefined)?.is_admin;
+  }
+
+  // ---- soundboard ----
+
+  sounds(): Sound[] {
+    return this.db.prepare('SELECT id, name, emoji, uploader_id, size FROM sounds ORDER BY created_at').all() as Sound[];
+  }
+
+  sound(id: string): (Sound & { mime: string }) | undefined {
+    return this.db.prepare('SELECT id, name, emoji, uploader_id, size, mime FROM sounds WHERE id = ?').get(id) as
+      | (Sound & { mime: string })
+      | undefined;
+  }
+
+  addSound(s: Sound & { mime: string }): void {
+    this.db
+      .prepare('INSERT INTO sounds (id, name, emoji, uploader_id, mime, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(s.id, s.name, s.emoji, s.uploader_id, s.mime, s.size, Date.now());
+  }
+
+  deleteSound(id: string): void {
+    this.db.prepare('DELETE FROM sounds WHERE id = ?').run(id);
+  }
+
+  soundCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM sounds').get() as { n: number }).n;
   }
 
   tx<T>(fn: () => T): T {
@@ -150,6 +260,9 @@ export class Db {
     this.db
       .prepare('INSERT INTO users (id, username, display_name, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(id, username, displayName, passwordHash, isAdmin ? 1 : 0, Date.now());
+    // Quem chega entra em todas as salas fixas.
+    const ins = this.db.prepare('INSERT OR IGNORE INTO conversation_members (conversation_id, user_id, joined_at) VALUES (?, ?, ?)');
+    for (const room of this.roomIds()) ins.run(room, id, Date.now());
     return { id, username, display_name: displayName };
   }
 

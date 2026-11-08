@@ -10,6 +10,8 @@ import type {
   FileAttachment,
   Attachment,
   MediaAction,
+  Sound,
+  UserStatus,
 } from '../../shared/protocol.ts';
 import { isMutation, MAX_MESSAGE_LENGTH } from '../../shared/protocol.ts';
 import { GatewayClient, httpPost } from './gateway.ts';
@@ -18,6 +20,7 @@ import { DEFAULT_NOISE, type MicSettings } from './mic.ts';
 import { ulid } from './ulid.ts';
 import { autoDownload, formatSize } from './files.ts';
 import { accelFromEvent, hotkeyOf, mainKey } from './hotkeys.ts';
+import { playSound } from './sounds.ts';
 import type { EmbeddedConfig, HostConfig, HostStatus, Profile, Settings, UpdateStatus } from './native.d.ts';
 
 export function micSettings(s: Settings | undefined): MicSettings {
@@ -72,6 +75,9 @@ export type State = {
   update: UpdateStatus;
   /** Celular: som da call no alto-falante (senão no fone de ouvido). */
   speaker: boolean;
+  statuses: Record<string, UserStatus>;
+  sounds: Sound[];
+  admin: boolean;
 };
 
 type Listener = () => void;
@@ -104,6 +110,9 @@ class App {
     stage: 'normal',
     update: { state: 'idle', current: '' },
     speaker: true,
+    statuses: {},
+    sounds: [],
+    admin: false,
   };
 
   private listeners = new Set<Listener>();
@@ -149,9 +158,92 @@ class App {
   }
 
   conversationTitle(c: Conversation): string {
+    if (c.type === 'ROOM') return c.name ?? 'Sala';
     if (c.type === 'GROUP') return c.name ?? 'Grupo';
     const other = c.members.find((m) => m.id !== this.me()?.id);
     return other?.display_name ?? 'Conversa';
+  }
+
+  // ---- status, menções, silenciar ----
+
+  myStatus(): UserStatus {
+    const id = this.me()?.id;
+    return (id && this.state.statuses[id]) || { availability: 'online', text: '', emoji: '' };
+  }
+
+  statusOf(userId: string): UserStatus | undefined {
+    return this.state.statuses[userId];
+  }
+
+  async setStatus(status: UserStatus): Promise<void> {
+    this.autoIdle = false;
+    await this.requireOnline().request('status.set', { status });
+  }
+
+  /** Ausente sozinho depois de 10 min sem mexer no PC (e volta quando mexer). */
+  private autoIdle = false;
+  private watchIdle(): void {
+    if (!window.native.idleSeconds) return;
+    window.setInterval(async () => {
+      if (this.state.connection !== 'online') return;
+      const idle = await window.native.idleSeconds!();
+      const st = this.myStatus();
+      if (!this.autoIdle && st.availability === 'online' && idle >= 600) {
+        this.autoIdle = true;
+        this.gw?.request('status.set', { status: { ...st, availability: 'idle' } }).catch(() => {});
+      } else if (this.autoIdle && idle < 30) {
+        this.autoIdle = false;
+        if (st.availability === 'idle') this.gw?.request('status.set', { status: { ...st, availability: 'online' } }).catch(() => {});
+      }
+    }, 30_000);
+  }
+
+  mentionsMe(text: string): boolean {
+    const me = this.me();
+    if (!me) return false;
+    return new RegExp(`(^|[^\\w@])@(${me.username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|todos|everyone)\\b`, 'i').test(text);
+  }
+
+  isMuted(conversationId: string): boolean {
+    return !!this.state.profile?.settings?.muted_conversations?.includes(conversationId);
+  }
+
+  async toggleMuteConversation(conversationId: string): Promise<void> {
+    const list = this.state.profile?.settings?.muted_conversations ?? [];
+    await this.saveSettings({
+      muted_conversations: list.includes(conversationId) ? list.filter((x) => x !== conversationId) : [...list, conversationId],
+    });
+  }
+
+  // ---- salas e soundboard ----
+
+  async createRoom(name: string): Promise<Conversation> {
+    const { conversation } = await this.requireOnline().request('room.create', { name });
+    return conversation;
+  }
+
+  async renameRoom(conversationId: string, name: string): Promise<void> {
+    await this.requireOnline().request('room.rename', { conversation_id: conversationId, name });
+  }
+
+  async deleteRoom(conversationId: string): Promise<void> {
+    await this.requireOnline().request('room.delete', { conversation_id: conversationId });
+  }
+
+  async playSoundForAll(soundId: string): Promise<void> {
+    const call = this.state.call;
+    if (!call) throw new Error('Entre numa call para usar o soundboard');
+    await this.requireOnline().request('call.sound', { conversation_id: call.conversationId, sound_id: soundId });
+  }
+
+  async deleteSound(id: string): Promise<void> {
+    await this.requireOnline().request('sound.delete', { id });
+  }
+
+  userByUsername(username: string): UserPublic | undefined {
+    const u = username.toLowerCase();
+    for (const c of this.state.conversations) for (const m of c.members) if (m.username.toLowerCase() === u) return m;
+    return this.state.friends.find((f) => f.user.username.toLowerCase() === u)?.user;
   }
 
   directPeer(c: Conversation): UserPublic | undefined {
@@ -170,6 +262,7 @@ class App {
       window.native.updateStatus(),
     ]);
     window.native.onUpdateStatus((u) => this.set({ update: u }));
+    this.watchIdle();
     const profile = stored && { ...stored, role: stored.role ?? 'client' };
     // Offline-first: mostra o que está no cache antes de qualquer rede.
     this.set({
@@ -323,6 +416,9 @@ class App {
         conversations: d.conversations,
         presences: d.presences,
         calls,
+        statuses: d.statuses ?? {},
+        sounds: d.sounds ?? [],
+        admin: !!d.admin,
       });
       this.saveCache();
       this.flushOutbox();
@@ -343,6 +439,21 @@ class App {
       this.set({ presences: { ...this.state.presences, [user_id]: status } });
     });
     gw.on('message.created', ({ message }) => this.receive(message));
+    gw.on('status.update', ({ user_id, status }) => {
+      this.set({ statuses: { ...this.state.statuses, [user_id]: status } });
+    });
+    gw.on('sounds.sync', ({ sounds }) => this.set({ sounds }));
+    gw.on('conversation.removed', ({ conversation_id }) => {
+      this.set({
+        conversations: this.state.conversations.filter((c) => c.id !== conversation_id),
+        selected: this.state.selected === conversation_id ? null : this.state.selected,
+      });
+      this.saveCache();
+    });
+    gw.on('call.sound', ({ conversation_id, sound_id }) => {
+      const call = this.state.call;
+      if (call?.conversationId === conversation_id && !call.deafened) playSound(sound_id).catch(() => {});
+    });
     gw.on('typing', ({ conversation_id, user_id }) => {
       const conv = { ...(this.state.typing[conversation_id] ?? {}), [user_id]: Date.now() + TYPING_TTL_MS };
       this.set({ typing: { ...this.state.typing, [conversation_id]: conv } });
@@ -403,6 +514,7 @@ class App {
   }
 
   private notify(title: string, body: string): void {
+    if (this.myStatus().availability === 'dnd') return; // não perturbe
     if (window.native.notify) {
       // Celular: com o app aberto na frente, a própria tela já mostra.
       if (document.hidden) window.native.notify(title, body);
@@ -446,8 +558,10 @@ class App {
       }
       const conv = this.state.conversations.find((c) => c.id === message.conversation_id);
       const sender = this.user(message.sender_id)?.display_name ?? 'Alguém';
-      const title = conv?.type === 'GROUP' ? `${sender} em ${this.conversationTitle(conv)}` : sender;
-      this.notify(title, message.content.slice(0, 140));
+      const title = conv?.type !== 'DIRECT' && conv ? `${sender} em ${this.conversationTitle(conv)}` : sender;
+      // Conversa silenciada só avisa se me mencionaram.
+      const mentioned = this.mentionsMe(message.content);
+      if (!this.isMuted(message.conversation_id) || mentioned) this.notify(mentioned ? `${title} mencionou você` : title, message.content.slice(0, 140));
     }
     // Para de mostrar "digitando" de quem acabou de mandar.
     const t = this.state.typing[message.conversation_id];

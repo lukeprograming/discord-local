@@ -16,7 +16,8 @@ export type Friend = {
   status: FriendStatus;
 };
 
-export type ConversationType = 'DIRECT' | 'GROUP';
+/** ROOM = sala fixa do servidor: todo mundo participa, a voz fica aberta (sem tocar pra ninguém). */
+export type ConversationType = 'DIRECT' | 'GROUP' | 'ROOM';
 
 export type Conversation = {
   id: string;
@@ -141,6 +142,27 @@ export type RtcSignal =
   /** Diz qual stream é a câmera (o resto do vídeo é tela). */
   | { type: 'streams'; camera: string | null };
 
+export type Availability = 'online' | 'idle' | 'dnd';
+
+/** Status escolhido pela pessoa (fica salvo no host). */
+export type UserStatus = {
+  availability: Availability;
+  text: string; // até 80
+  emoji: string; // até 16
+};
+
+/** Som do soundboard (o áudio fica no host: GET /sounds/<id>). */
+export type Sound = {
+  id: string;
+  name: string;
+  emoji: string;
+  uploader_id: string;
+  size: number;
+};
+
+export const MAX_SOUND_BYTES = 1024 * 1024;
+export const MAX_SOUNDS = 60;
+
 export type ReadyPayload = {
   connection_id: string;
   user: UserPublic;
@@ -148,6 +170,10 @@ export type ReadyPayload = {
   conversations: Conversation[];
   presences: Record<string, Presence>;
   calls: CallInfo[];
+  statuses?: Record<string, UserStatus>;
+  sounds?: Sound[];
+  /** Sou o admin (host): posso criar/renomear/apagar salas. */
+  admin?: boolean;
 };
 
 // ---- cliente -> servidor (comandos com `rid` recebem `ack`) ----
@@ -170,6 +196,13 @@ export type ClientOps = {
     delete_of?: string;
     reaction?: { target: string; emoji: string; on: boolean };
   };
+  'status.set': { status: UserStatus };
+  'room.create': { name: string };
+  'room.rename': { conversation_id: string; name: string };
+  'room.delete': { conversation_id: string };
+  'sound.delete': { id: string };
+  /** Toca um som do soundboard pra todos na call. */
+  'call.sound': { conversation_id: string; sound_id: string };
   /** Controle do bot de YouTube da call (todos na call podem mexer). */
   'call.media': { conversation_id: string; action: MediaAction };
   'mailbox.ack': { ids: string[] };
@@ -185,6 +218,7 @@ export type ClientOpResults = {
   'invite.create': { code: string };
   'group.create': { conversation: Conversation };
   'message.send': { message: Message };
+  'room.create': { conversation: Conversation };
 };
 
 // ---- servidor -> cliente ----
@@ -197,6 +231,10 @@ export type ServerOps = {
   'conversation.upsert': { conversation: Conversation };
   'message.created': { message: Message };
   'presence.update': { user_id: string; status: Presence };
+  'status.update': { user_id: string; status: UserStatus };
+  'conversation.removed': { conversation_id: string };
+  'sounds.sync': { sounds: Sound[] };
+  'call.sound': { conversation_id: string; sound_id: string; user_id: string };
   typing: { conversation_id: string; user_id: string };
   'call.update': { call: CallInfo };
   'call.ringing': { conversation_id: string; from_user_id: string };

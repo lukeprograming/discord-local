@@ -5,6 +5,7 @@ import { SCREEN_PRESETS, type ScreenPreset } from '../rtc.ts';
 import { Avatar } from './common.tsx';
 import { openMini } from '../mini.ts';
 import { BotPanel, BotPlayer } from './YouTubeBot.tsx';
+import { SoundboardPanel } from './Soundboard.tsx';
 
 export function CallPanel({ conversation }: { conversation: Conversation }) {
   const s = useApp((s) => s);
@@ -12,6 +13,7 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
   const session = s.call?.conversationId === conversation.id ? s.call : null;
   const [shareOpen, setShareOpen] = useState(false);
   const [botOpen, setBotOpen] = useState(false);
+  const [soundsOpen, setSoundsOpen] = useState(false);
   const [focused, setFocused] = useState<string | null>(null); // mostrar só a tela dessa conexão
   const [volumeFor, setVolumeFor] = useState<string | null>(null); // conexão com o popup de volume aberto
   const stage = s.stage;
@@ -193,6 +195,9 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
             🖥
           </button>
         )}
+        <button className={`round ${soundsOpen ? 'on' : ''}`} title="Soundboard" onClick={() => setSoundsOpen(!soundsOpen)}>
+          📢
+        </button>
         <button className={`round ${botOpen || media?.queue.length ? 'on' : ''}`} title="Bot do YouTube (vídeo/música juntos)" onClick={() => setBotOpen(!botOpen)}>
           🎵
         </button>
@@ -210,6 +215,7 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
         </button>
       </div>
 
+      {soundsOpen && <SoundboardPanel onClose={() => setSoundsOpen(false)} />}
       {botOpen && <BotPanel media={media} onClose={() => setBotOpen(false)} />}
       {s.callError && <div className="error">{s.callError}</div>}
       {shareOpen && <ShareOptions onClose={() => setShareOpen(false)} />}

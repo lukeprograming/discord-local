@@ -27,6 +27,40 @@ export function Chat({ conversation }: { conversation: Conversation }) {
   const [menuFor, setMenuFor] = useState<string | null>(null); // ações abertas (toque no celular)
   const [pickerFor, setPickerFor] = useState<string | null>(null); // seletor de reação aberto
   const meId = s.profile?.user.id;
+  const room = conversation.type === 'ROOM';
+  const [mention, setMention] = useState<{ start: number; query: string; index: number } | null>(null);
+  const others = conversation.members.filter((m) => m.id !== meId);
+  const mentionList = mention
+    ? [...others.map((m) => ({ key: m.username, label: m.display_name })), ...(others.length > 1 ? [{ key: 'todos', label: 'avisa todo mundo' }] : [])]
+        .filter((o) => o.key.toLowerCase().startsWith(mention.query.toLowerCase()) || o.label.toLowerCase().startsWith(mention.query.toLowerCase()))
+        .slice(0, 6)
+    : [];
+
+  function peerStatusLine(id: string): string {
+    const st = app.statusOf(id);
+    const a = st?.availability === 'idle' ? 'ausente' : st?.availability === 'dnd' ? 'não perturbe' : 'online';
+    return st?.text || st?.emoji ? `${a} · ${st.emoji} ${st.text}` : a;
+  }
+
+  /** Atualiza a lista de @ conforme o texto antes do cursor. */
+  function updateMention(value: string, caret: number) {
+    const m = /(^|\s)@([\w.-]*)$/.exec(value.slice(0, caret));
+    setMention(m ? { start: caret - m[2].length - 1, query: m[2], index: 0 } : null);
+  }
+
+  function pickMention(key: string) {
+    if (!mention) return;
+    const el = inputRef.current;
+    const caret = el?.selectionStart ?? text.length;
+    const next = text.slice(0, mention.start) + `@${key} ` + text.slice(caret);
+    setText(next);
+    setMention(null);
+    const pos = mention.start + key.length + 2;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(pos, pos);
+    });
+  }
 
   const stored = s.messages[conversation.id] ?? [];
   const pending = s.outbox.filter((m) => m.conversation_id === conversation.id);
@@ -64,6 +98,23 @@ export function Chat({ conversation }: { conversation: Conversation }) {
   const canEdit = (m: ViewMessage) => m.sender_id === meId && !m.deleted && !m.attachment;
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (mention && mentionList.length) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const d = e.key === 'ArrowDown' ? 1 : -1;
+        setMention({ ...mention, index: (mention.index + d + mentionList.length) % mentionList.length });
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        pickMention(mentionList[mention.index]?.key ?? mentionList[0].key);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setMention(null);
+        return;
+      }
+    }
     // No celular o Enter do teclado quebra linha; envia pelo botão.
     if (e.key === 'Enter' && !e.shiftKey && !mobile) {
       e.preventDefault();
@@ -126,15 +177,28 @@ export function Chat({ conversation }: { conversation: Conversation }) {
       {dragging && <div className="drop-hint">Solte para enviar para {app.conversationTitle(conversation)}</div>}
       <header className="chat-header">
         <button className="icon back-btn" title="Voltar" onClick={() => app.select(null)}>←</button>
-        {peer ? <Avatar user={peer} online={s.presences[peer.id] === 'ONLINE'} /> : <span className="avatar group-avatar">#</span>}
+        {peer ? (
+          <Avatar user={peer} online={s.presences[peer.id] === 'ONLINE'} availability={app.statusOf(peer.id)?.availability} />
+        ) : (
+          <span className="avatar group-avatar">{room ? '🔊' : '#'}</span>
+        )}
         <div className="chat-title">
           <strong>{app.conversationTitle(conversation)}</strong>
           <small className="muted">
-            {conversation.type === 'GROUP'
-              ? conversation.members.map((m) => m.display_name).join(', ')
-              : peer && (s.presences[peer.id] === 'ONLINE' ? 'online' : 'offline')}
+            {room
+              ? `sala fixa · ${conversation.members.length} pessoas · ${conversation.members.filter((m) => s.presences[m.id] === 'ONLINE' || m.id === meId).length} online`
+              : conversation.type === 'GROUP'
+                ? conversation.members.map((m) => m.display_name).join(', ')
+                : peer && (s.presences[peer.id] === 'ONLINE' ? peerStatusLine(peer.id) : 'offline')}
           </small>
         </div>
+        <button
+          className="icon"
+          title={app.isMuted(conversation.id) ? 'Ativar notificações' : 'Silenciar conversa (menção com @ ainda avisa)'}
+          onClick={() => app.toggleMuteConversation(conversation.id)}
+        >
+          {app.isMuted(conversation.id) ? '🔕' : '🔔'}
+        </button>
         {!inCall && (
           <button
             className="call-btn"
@@ -142,7 +206,7 @@ export function Chat({ conversation }: { conversation: Conversation }) {
             title={s.connection !== 'online' ? 'Precisa estar conectado' : call ? 'Entrar na call' : 'Iniciar call'}
             onClick={() => app.joinCall(conversation.id).catch((e) => app.toast(e.message))}
           >
-            {call ? '🔊 Entrar na call' : '📞 Ligar'}
+            {room ? '🔊 Entrar na voz' : call ? '🔊 Entrar na call' : '📞 Ligar'}
           </button>
         )}
       </header>
@@ -169,7 +233,7 @@ export function Chat({ conversation }: { conversation: Conversation }) {
               {newDay && <div className="day-sep"><span>{new Date(m.created_at).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</span></div>}
               <div
                 id={`msg-${m.id}`}
-                className={`msg ${grouped ? 'grouped' : ''} ${m.pending ? 'pending' : ''} ${menuFor === m.id ? 'menu-open' : ''} ${replyTo?.id === m.id ? 'replying' : ''}`}
+                className={`msg ${grouped ? 'grouped' : ''} ${!mine && !m.deleted && app.mentionsMe(m.content) ? 'mention-me' : ''} ${m.pending ? 'pending' : ''} ${menuFor === m.id ? 'menu-open' : ''} ${replyTo?.id === m.id ? 'replying' : ''}`}
                 onClick={mobile && !m.deleted ? () => setMenuFor(menuFor === m.id ? null : m.id) : undefined}
               >
                 {m.reply_to && (
@@ -258,6 +322,20 @@ export function Chat({ conversation }: { conversation: Conversation }) {
 
       <div className="composer">
         <UploadList conversationId={conversation.id} />
+        {mention && mentionList.length > 0 && (
+          <div className="mention-list">
+            {mentionList.map((o, i) => (
+              <button
+                key={o.key}
+                className={i === mention.index ? 'on' : ''}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pickMention(o.key)}
+              >
+                <strong>@{o.key}</strong> <span className="muted">{o.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {replyTo && (
           <div className="reply-bar">
             <span>
@@ -297,8 +375,10 @@ export function Chat({ conversation }: { conversation: Conversation }) {
           placeholder={`Mensagem para ${app.conversationTitle(conversation)}${s.connection !== 'online' ? ' (vai quando conectar)' : ''}`}
           onChange={(e) => {
             setText(e.target.value);
+            updateMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
             if (e.target.value) app.typing(conversation.id);
           }}
+          onBlur={() => setTimeout(() => setMention(null), 150)}
           onKeyDown={onKeyDown}
           onPaste={(e) => {
             // Print/imagem copiada: vira arquivo.
@@ -392,9 +472,31 @@ function Linkify({ text }: { text: string }) {
             )}
           </Fragment>
         ) : (
-          <Fragment key={i}>{p}</Fragment>
+          <Mentions key={i} text={p} />
         ),
       )}
+    </>
+  );
+}
+
+/** Destaca @usuario (e @todos) no texto. */
+function Mentions({ text }: { text: string }) {
+  const parts = text.split(/(@[\w.-]+)/g);
+  if (parts.length === 1) return <>{text}</>;
+  const me = app.me()?.username.toLowerCase();
+  return (
+    <>
+      {parts.map((p, i) => {
+        if (i % 2 === 0) return <Fragment key={i}>{p}</Fragment>;
+        const name = p.slice(1).toLowerCase();
+        const known = name === 'todos' || name === 'everyone' || !!app.userByUsername(name);
+        if (!known) return <Fragment key={i}>{p}</Fragment>;
+        return (
+          <span key={i} className={`mention ${name === me || name === 'todos' || name === 'everyone' ? 'me' : ''}`}>
+            {p}
+          </span>
+        );
+      })}
     </>
   );
 }

@@ -355,3 +355,48 @@ button.link.back { display: block; margin: 14px auto 0; }
 .shortcut-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .shortcut-field button { min-width: 180px; font-family: ui-monospace, monospace; font-size: 13px; }
 .shortcut-field button.recording { background: var(--accent); color: white; }
+
+/* ---- 0.5: salas, status, menções, soundboard ---- */
+.presence.idle { background: #f0b232; }
+.presence.dnd { background: var(--red); }
+.item-status { display: block; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item.muted-conv .item-name { opacity: .6; }
+.badge-muted { background: #4e5058 !important; }
+.room-icon { width: 32px; text-align: center; font-size: 16px; flex-shrink: 0; }
+.room-join { font-size: 11px; padding: 1px 6px; border-radius: 6px; background: var(--bg-3); color: var(--text); opacity: 0; }
+.room .item:hover .room-join { opacity: 1; }
+.room-people { display: flex; flex-direction: column; gap: 2px; margin: 0 0 4px 42px; }
+.room-person { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+.room-person .live { background: var(--red); color: white; font-size: 9px; font-weight: 700; padding: 0 4px; border-radius: 3px; }
+.me-status { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; background: none; padding: 2px 4px; border-radius: 6px; text-align: left; color: inherit; }
+.me-status:hover { background: var(--bg-hover); }
+.status-pop { position: absolute; left: 8px; bottom: 60px; width: 290px; z-index: 20; background: var(--bg-0); border-radius: 10px; padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.45); display: flex; flex-direction: column; gap: 4px; }
+.status-opt { background: none; text-align: left; padding: 6px 8px; border-radius: 6px; color: var(--text); }
+.status-opt:hover, .status-opt.on { background: var(--bg-3); }
+.status-opt small { display: block; font-size: 11px; }
+.status-pop form { display: flex; flex-direction: column; gap: 6px; }
+.status-emojis { display: flex; flex-wrap: wrap; gap: 2px; }
+.status-emojis button { background: none; font-size: 18px; padding: 2px 5px; border-radius: 6px; }
+.status-emojis button.on { background: var(--accent); }
+.sidebar { position: relative; }
+.small-modal { max-width: 380px; }
+.danger-link { color: var(--red) !important; align-self: flex-start; }
+button.danger { background: var(--red); color: white; }
+.mention { background: rgba(88,101,242,.25); color: #c9cdfb; border-radius: 3px; padding: 0 2px; font-weight: 500; }
+.mention.me { background: rgba(240,178,50,.25); color: #f0b232; }
+.msg.mention-me { background: rgba(240,178,50,.08); box-shadow: inset 2px 0 #f0b232; }
+.mention-list { display: flex; flex-direction: column; background: var(--bg-1); border-radius: var(--radius); padding: 4px; margin-bottom: 4px; }
+.mention-list button { background: none; text-align: left; padding: 5px 8px; border-radius: 6px; color: var(--text); }
+.mention-list button.on, .mention-list button:hover { background: var(--bg-3); }
+.soundboard .bot-panel-head .muted { flex: 1; }
+.sound-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+.sound-btn-wrap { position: relative; }
+.sound-btn { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px; background: var(--bg-3); border-radius: 8px; }
+.sound-btn:hover { background: var(--accent); color: white; }
+.sound-btn:active { transform: scale(.96); }
+.sound-btn.add { background: none; border: 1px dashed var(--muted); }
+.sound-emoji { font-size: 22px; }
+.sound-name { font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sound-del { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; border-radius: 50%; font-size: 10px; background: var(--bg-0); display: none; }
+.sound-btn-wrap:hover .sound-del { display: block; }
+.add-sound { display: flex; flex-direction: column; gap: 6px; background: var(--bg-2); border-radius: 8px; padding: 8px; }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { app, useApp } from '../app.ts';
-import { Avatar } from './common.tsx';
+import type { Availability, Conversation } from '../../../shared/protocol.ts';
+import { Avatar, PromptModal } from './common.tsx';
 import { Settings } from './Settings.tsx';
 import { UpdateBanner } from './Update.tsx';
 
@@ -9,28 +10,90 @@ export function Sidebar() {
   const [adding, setAdding] = useState(false);
   const [grouping, setGrouping] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [roomPrompt, setRoomPrompt] = useState<{ mode: 'create' } | { mode: 'rename'; room: Conversation } | null>(null);
   const me = s.profile!.user;
+  const myStatus = app.myStatus();
 
   const incoming = s.friends.filter((f) => f.status === 'INCOMING');
   const outgoing = s.friends.filter((f) => f.status === 'OUTGOING');
   const directs = s.conversations.filter((c) => c.type === 'DIRECT');
   const groups = s.conversations.filter((c) => c.type === 'GROUP');
+  const rooms = s.conversations.filter((c) => c.type === 'ROOM');
   const friendIds = new Set(s.friends.filter((f) => f.status === 'ACCEPTED').map((f) => f.user.id));
 
   const convItem = (c: (typeof s.conversations)[number]) => {
     const peer = app.directPeer(c);
     const online = peer ? s.presences[peer.id] === 'ONLINE' : undefined;
+    const st = peer ? app.statusOf(peer.id) : undefined;
     const call = s.calls[c.id];
+    const muted = app.isMuted(c.id);
     return (
-      <button key={c.id} className={`item ${s.selected === c.id ? 'active' : ''}`} onClick={() => app.select(c.id)}>
-        {peer ? <Avatar user={peer} online={online} /> : <span className="avatar group-avatar">#</span>}
+      <button key={c.id} className={`item ${s.selected === c.id ? 'active' : ''} ${muted ? 'muted-conv' : ''}`} onClick={() => app.select(c.id)}>
+        {peer ? <Avatar user={peer} online={online} availability={st?.availability} /> : <span className="avatar group-avatar">#</span>}
         <span className="item-name">
           {app.conversationTitle(c)}
           {peer && !friendIds.has(peer.id) && <small className="muted"> (não é mais amigo)</small>}
+          {online && (st?.text || st?.emoji) && (
+            <small className="item-status">
+              {st.emoji} {st.text}
+            </small>
+          )}
         </span>
+        {muted && <span title="Silenciada">🔕</span>}
         {call && <span className="badge call-badge" title="Call ativa">🔊 {call.participants.length}</span>}
-        {!!s.unread[c.id] && <span className="badge">{s.unread[c.id]}</span>}
+        {!!s.unread[c.id] && <span className={`badge ${muted ? 'badge-muted' : ''}`}>{s.unread[c.id]}</span>}
       </button>
+    );
+  };
+
+  const roomItem = (c: Conversation) => {
+    const call = s.calls[c.id];
+    const inThis = s.call?.conversationId === c.id;
+    return (
+      <div key={c.id} className="room">
+        <button
+          className={`item ${s.selected === c.id ? 'active' : ''} ${app.isMuted(c.id) ? 'muted-conv' : ''}`}
+          onClick={() => app.select(c.id)}
+          onContextMenu={(e) => {
+            if (!s.admin) return;
+            e.preventDefault();
+            setRoomPrompt({ mode: 'rename', room: c });
+          }}
+          title={s.admin ? 'Botão direito: renomear/apagar' : undefined}
+        >
+          <span className="room-icon">🔊</span>
+          <span className="item-name">{app.conversationTitle(c)}</span>
+          {app.isMuted(c.id) && <span title="Silenciada">🔕</span>}
+          {!!s.unread[c.id] && <span className={`badge ${app.isMuted(c.id) ? 'badge-muted' : ''}`}>{s.unread[c.id]}</span>}
+          {!inThis && (
+            <span
+              className="room-join"
+              title="Entrar na voz"
+              onClick={(e) => {
+                e.stopPropagation();
+                app.select(c.id);
+                app.joinCall(c.id).catch((err) => app.toast(err.message));
+              }}
+            >
+              entrar
+            </span>
+          )}
+        </button>
+        {call && call.participants.length > 0 && (
+          <div className="room-people">
+            {call.participants.map((p) => (
+              <div key={p.connection_id} className="room-person">
+                <Avatar user={app.user(p.user_id)} size={20} speaking={inThis && (p.connection_id === s.connectionId ? s.call?.localSpeaking : s.call?.remotes().find((r) => r.connectionId === p.connection_id)?.speaking)} />
+                <span>{app.user(p.user_id)?.display_name}</span>
+                {p.muted && <small>🔇</small>}
+                {p.deafened && <small>🙉</small>}
+                {p.screen_sharing && <small className="live">AO VIVO</small>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -80,6 +143,20 @@ export function Sidebar() {
           </section>
         )}
 
+        {rooms.length > 0 && (
+          <section>
+            <h5>
+              Salas
+              {s.admin && (
+                <button className="link" onClick={() => setRoomPrompt({ mode: 'create' })} title="Criar sala">
+                  + sala
+                </button>
+              )}
+            </h5>
+            {rooms.map(roomItem)}
+          </section>
+        )}
+
         <section>
           <h5>
             Mensagens diretas
@@ -107,17 +184,35 @@ export function Sidebar() {
 
       <UpdateBanner />
       <div className="me">
-        <Avatar user={me} online={s.connection === 'online'} />
-        <div className="me-name">
-          <strong>{me.display_name}</strong>
-          <small className="muted">@{me.username}</small>
-        </div>
+        <button className="me-status" title="Mudar status" onClick={() => setStatusOpen(!statusOpen)} disabled={s.connection !== 'online'}>
+          <Avatar user={me} online={s.connection === 'online'} availability={myStatus.availability} />
+          <div className="me-name">
+            <strong>{me.display_name}</strong>
+            <small className="muted">{myStatus.text || myStatus.emoji ? `${myStatus.emoji} ${myStatus.text}` : `@${me.username}`}</small>
+          </div>
+        </button>
         <button className="icon" title="Configurações" onClick={() => setSettings(true)}>⚙</button>
       </div>
 
       {adding && <AddFriend onClose={() => setAdding(false)} />}
       {grouping && <CreateGroup onClose={() => setGrouping(false)} />}
       {settings && <Settings onClose={() => setSettings(false)} />}
+      {statusOpen && <StatusEditor onClose={() => setStatusOpen(false)} />}
+      {roomPrompt?.mode === 'create' && (
+        <PromptModal
+          title="Nova sala"
+          placeholder="ex.: Jogos, Música, Estudos"
+          okLabel="Criar"
+          onOk={async (name) => {
+            const c = await app.createRoom(name);
+            app.select(c.id);
+          }}
+          onClose={() => setRoomPrompt(null)}
+        />
+      )}
+      {roomPrompt?.mode === 'rename' && (
+        <RoomEditor room={roomPrompt.room} onClose={() => setRoomPrompt(null)} />
+      )}
     </aside>
   );
 }
@@ -216,5 +311,82 @@ function CreateGroup({ onClose }: { onClose: () => void }) {
         </div>
       </form>
     </div>
+  );
+}
+
+const AVAILABILITY: { v: Availability; label: string; hint: string }[] = [
+  { v: 'online', label: '🟢 Disponível', hint: '' },
+  { v: 'idle', label: '🌙 Ausente', hint: 'fica sozinho depois de 10 min parado' },
+  { v: 'dnd', label: '⛔ Não perturbe', hint: 'sem notificações' },
+];
+const STATUS_EMOJIS = ['🎮', '🎧', '💻', '📚', '🍕', '😴', '🏃', '🎬'];
+
+function StatusEditor({ onClose }: { onClose: () => void }) {
+  const current = app.myStatus();
+  const [text, setText] = useState(current.text);
+  const [emoji, setEmoji] = useState(current.emoji);
+  const save = (patch: Partial<typeof current>) =>
+    app.setStatus({ ...current, text, emoji, ...patch }).catch((e) => app.toast(e.message));
+  return (
+    <div className="status-pop" onClick={(e) => e.stopPropagation()}>
+      {AVAILABILITY.map((a) => (
+        <button key={a.v} className={`status-opt ${current.availability === a.v ? 'on' : ''}`} onClick={() => save({ availability: a.v })}>
+          {a.label} {a.hint && <small className="muted">{a.hint}</small>}
+        </button>
+      ))}
+      <hr />
+      <div className="status-emojis">
+        {STATUS_EMOJIS.map((e) => (
+          <button key={e} className={emoji === e ? 'on' : ''} onClick={() => setEmoji(emoji === e ? '' : e)}>
+            {e}
+          </button>
+        ))}
+      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          save({}).then(onClose);
+        }}
+      >
+        <input value={text} maxLength={80} placeholder="O que você está fazendo? (ex.: jogando CS)" onChange={(e) => setText(e.target.value)} />
+        <div className="modal-actions">
+          <button type="button" onClick={() => app.setStatus({ ...current, text: '', emoji: '' }).then(onClose).catch((e) => app.toast(e.message))}>
+            Limpar
+          </button>
+          <button type="button" onClick={onClose}>Fechar</button>
+          <button type="submit" className="primary">Salvar</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function RoomEditor({ room, onClose }: { room: Conversation; onClose: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  if (confirming) {
+    return (
+      <div className="modal-backdrop" onClick={onClose}>
+        <div className="modal small-modal" onClick={(e) => e.stopPropagation()}>
+          <h3>Apagar a sala "{room.name}"?</h3>
+          <p className="muted small">Some da lateral de todo mundo. O histórico de mensagens continua guardado no PC de cada um.</p>
+          <div className="modal-actions">
+            <button onClick={onClose}>Cancelar</button>
+            <button className="danger" onClick={() => app.deleteRoom(room.id).then(onClose).catch((e) => app.toast(e.message))}>
+              Apagar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <PromptModal
+      title="Renomear sala"
+      initial={room.name ?? ''}
+      okLabel="Salvar"
+      onOk={(name) => app.renameRoom(room.id, name)}
+      onClose={onClose}
+      extra={<button type="button" className="link danger-link" onClick={() => setConfirming(true)}>apagar sala…</button>}
+    />
   );
 }

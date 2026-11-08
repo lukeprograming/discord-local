@@ -6,6 +6,7 @@ import type {
   ServerOps,
   UserPublic,
   VoiceAttachment,
+  UserStatus,
   Attachment,
   FileAttachment,
 } from '../../shared/protocol.ts';
@@ -134,7 +135,11 @@ export class Gateway {
 
     const friends = this.db.friendsOf(user.id);
     const presences: Record<string, 'ONLINE' | 'OFFLINE'> = {};
-    for (const f of friends) presences[f.user.id] = this.isOnline(f.user.id) ? 'ONLINE' : 'OFFLINE';
+    const statuses: Record<string, UserStatus> = { [user.id]: this.db.status(user.id) };
+    for (const id of this.db.contactIds(user.id)) {
+      presences[id] = this.isOnline(id) ? 'ONLINE' : 'OFFLINE';
+      statuses[id] = this.db.status(id);
+    }
     const conversations = this.db.conversationsOf(user.id);
     const convIds = new Set(conversations.map((c) => c.id));
 
@@ -145,6 +150,9 @@ export class Gateway {
       conversations,
       presences,
       calls: this.calls.all().filter((c) => convIds.has(c.conversation_id)),
+      statuses,
+      sounds: this.db.sounds(),
+      admin: this.db.isAdminId(user.id),
     });
     // Entrega o que ficou na caixa de correio enquanto estava offline.
     for (const message of this.db.mailboxFor(user.id)) this.send(conn, 'message.created', { message });
@@ -176,8 +184,26 @@ export class Gateway {
   }
 
   private broadcastPresence(userId: string, status: 'ONLINE' | 'OFFLINE'): void {
-    for (const fid of this.db.acceptedFriendIds(userId)) this.sendToUser(fid, 'presence.update', { user_id: userId, status });
+    for (const id of this.db.contactIds(userId)) this.sendToUser(id, 'presence.update', { user_id: userId, status });
   }
+
+  /** Alguém se cadastrou: as salas fixas ganharam membro (todo mundo recebe a lista nova). */
+  refreshRooms(): void {
+    for (const id of this.db.roomIds()) {
+      const conv = this.db.conversation(id);
+      if (conv) this.upsertConversation(conv);
+    }
+  }
+
+  /** Soundboard mudou: avisa todo mundo conectado. */
+  broadcastSounds(): void {
+    const sounds = this.db.sounds();
+    for (const c of this.conns.values()) if (c.user) this.send(c, 'sounds.sync', { sounds });
+  }
+
+  private lastSound = new Map<string, number>(); // conexão -> último som (anti-spam)
+  /** O servidor HTTP apaga o arquivo do som. */
+  onSoundDeleted?: (id: string) => void;
 
   private syncFriends(...userIds: string[]): void {
     for (const uid of userIds) this.sendToUser(uid, 'friends.sync', { friends: this.db.friendsOf(uid) });
@@ -361,7 +387,8 @@ export class Gateway {
         const c = this.conns.get(old);
         if (c) this.send(c, 'call.ended', { conversation_id: conversationId, duration_s: 0 });
       }
-      if (created) {
+      // Sala fixa: entrar na voz não toca pra ninguém.
+      if (created && this.db.conversation(conversationId)?.type !== 'ROOM') {
         for (const uid of this.db.memberIds(conversationId)) {
           if (uid !== conn.user.id) this.sendToUser(uid, 'call.ringing', { conversation_id: conversationId, from_user_id: conn.user.id });
         }
@@ -382,6 +409,69 @@ export class Gateway {
       const conversationId = this.requireMember(d.conversation_id, conn.user.id);
       if (!this.calls.setState(conversationId, conn.id, d)) throw new ClientError('você não está nessa call');
       this.sendToMembers(conversationId, 'call.update', { call: this.calls.info(conversationId)! });
+    },
+
+    'status.set': (conn, d) => {
+      const st = d?.status;
+      const availability = st?.availability === 'idle' || st?.availability === 'dnd' ? st.availability : 'online';
+      const status: UserStatus = {
+        availability,
+        text: typeof st?.text === 'string' ? st.text.trim().slice(0, 80) : '',
+        emoji: typeof st?.emoji === 'string' ? st.emoji.trim().slice(0, 16) : '',
+      };
+      this.db.setStatus(conn.user.id, status);
+      for (const id of [conn.user.id, ...this.db.contactIds(conn.user.id)]) {
+        this.sendToUser(id, 'status.update', { user_id: conn.user.id, status });
+      }
+    },
+
+    'room.create': (conn, d) => {
+      if (!this.db.isAdminId(conn.user.id)) throw new ClientError('só o host cria salas');
+      const name = typeof d.name === 'string' ? d.name.trim().slice(0, 64) : '';
+      if (!name) throw new ClientError('nome da sala vazio');
+      const conversation = this.db.tx(() => this.db.createRoom(name));
+      this.upsertConversation(conversation);
+      return { conversation };
+    },
+
+    'room.rename': (conn, d) => {
+      if (!this.db.isAdminId(conn.user.id)) throw new ClientError('só o host renomeia salas');
+      const conv = this.db.conversation(String(d.conversation_id));
+      const name = typeof d.name === 'string' ? d.name.trim().slice(0, 64) : '';
+      if (!conv || conv.type !== 'ROOM' || !name) throw new ClientError('sala inválida');
+      this.upsertConversation(this.db.renameRoom(conv.id, name)!);
+    },
+
+    'room.delete': (conn, d) => {
+      if (!this.db.isAdminId(conn.user.id)) throw new ClientError('só o host apaga salas');
+      const conv = this.db.conversation(String(d.conversation_id));
+      if (!conv || conv.type !== 'ROOM') throw new ClientError('sala inválida');
+      if (this.db.roomIds().length <= 1) throw new ClientError('precisa ficar pelo menos uma sala');
+      const duration_s = this.calls.end(conv.id);
+      const members = this.db.tx(() => this.db.deleteRoom(conv.id));
+      for (const uid of members) {
+        if (duration_s) this.sendToUser(uid, 'call.ended', { conversation_id: conv.id, duration_s });
+        this.sendToUser(uid, 'conversation.removed', { conversation_id: conv.id });
+      }
+    },
+
+    'sound.delete': (conn, d) => {
+      const snd = this.db.sound(String(d.id));
+      if (!snd) throw new ClientError('som não encontrado');
+      if (snd.uploader_id !== conn.user.id && !this.db.isAdminId(conn.user.id)) throw new ClientError('só quem enviou (ou o host) apaga o som');
+      this.db.deleteSound(snd.id);
+      this.onSoundDeleted?.(snd.id);
+      this.broadcastSounds();
+    },
+
+    'call.sound': (conn, d) => {
+      const conversationId = this.requireMember(d.conversation_id, conn.user.id);
+      if (!this.calls.inCall(conversationId, conn.id)) throw new ClientError('entre na call para tocar sons');
+      if (!this.db.sound(String(d.sound_id))) throw new ClientError('som não encontrado');
+      const now = Date.now();
+      if (now - (this.lastSound.get(conn.id) ?? 0) < 1500) throw new ClientError('calma, um som de cada vez');
+      this.lastSound.set(conn.id, now);
+      this.sendToMembers(conversationId, 'call.sound', { conversation_id: conversationId, sound_id: String(d.sound_id), user_id: conn.user.id });
     },
 
     'call.media': (conn, d) => {

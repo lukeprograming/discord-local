@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createReadStream, createWriteStream, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import { FILE_TTL_MS, MAX_FILE_BYTES } from '../../shared/protocol.ts';
+import { FILE_TTL_MS, MAX_FILE_BYTES, MAX_SOUND_BYTES, MAX_SOUNDS } from '../../shared/protocol.ts';
 import { ulid, ULID_RE } from './ids.ts';
 import { WebSocketServer } from 'ws';
 import { Db } from './db.ts';
@@ -166,6 +166,51 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     });
   }
 
+  // ---- soundboard (sons curtos, ficam no host em <dados>/sons/<id>) ----
+
+  const soundsDir = join(opts.dataDir, 'sons');
+  mkdirSync(soundsDir, { recursive: true });
+  gateway.onSoundDeleted = (id) => {
+    try {
+      unlinkSync(join(soundsDir, id));
+    } catch {
+      /* já não existe */
+    }
+  };
+
+  async function uploadSound(req: IncomingMessage, res: ServerResponse, url: URL) {
+    const user = authUser(req);
+    if (!user) return json(res, 401, { error: 'sessão inválida' });
+    const name = (url.searchParams.get('name') ?? '').trim().slice(0, 40);
+    const emoji = (url.searchParams.get('emoji') ?? '').trim().slice(0, 16) || '🔊';
+    const mime = String(req.headers['content-type'] || '').slice(0, 100);
+    if (!name) return json(res, 400, { error: 'dê um nome ao som' });
+    if (!mime.startsWith('audio/')) return json(res, 415, { error: 'precisa ser um arquivo de áudio' });
+    if (db.soundCount() >= MAX_SOUNDS) return json(res, 409, { error: `o soundboard já tem ${MAX_SOUNDS} sons; apague algum` });
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const c of req) {
+      size += c.length;
+      if (size > MAX_SOUND_BYTES) return json(res, 413, { error: 'som grande demais (máx. 1 MB)' });
+      chunks.push(c as Buffer);
+    }
+    if (!size) return json(res, 400, { error: 'arquivo vazio' });
+    const id = ulid();
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(join(soundsDir, id), Buffer.concat(chunks));
+    db.addSound({ id, name, emoji, uploader_id: user.id, mime, size });
+    gateway.broadcastSounds();
+    json(res, 200, { id });
+  }
+
+  function getSound(req: IncomingMessage, res: ServerResponse, id: string) {
+    if (!authUser(req)) return json(res, 401, { error: 'sessão inválida' });
+    const snd = db.sound(id);
+    if (!snd) return json(res, 404, { error: 'som não encontrado' });
+    res.writeHead(200, { 'content-type': snd.mime, 'content-length': snd.size, 'cache-control': 'private, max-age=31536000, immutable' });
+    createReadStream(join(soundsDir, id)).on('error', () => res.destroy()).pipe(res);
+  }
+
   function newTicket(req: IncomingMessage, res: ServerResponse, id: string) {
     const user = authUser(req);
     if (!user) return json(res, 401, { error: 'sessão inválida' });
@@ -199,6 +244,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       return u;
     });
     console.log(`[server] novo usuário: ${username}${first ? ' (admin)' : ''}`);
+    gateway.refreshRooms();
     return [200, { token, user }] as const;
   }
 
@@ -229,6 +275,9 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       }
       const url = new URL(req.url ?? '/', 'http://x');
       if (req.method === 'POST' && url.pathname === '/files') return upload(req, res, url);
+      if (req.method === 'POST' && url.pathname === '/sounds') return await uploadSound(req, res, url);
+      const sm = /^\/sounds\/([0-9A-Z]{26})$/.exec(url.pathname);
+      if (sm && req.method === 'GET' && ULID_RE.test(sm[1])) return getSound(req, res, sm[1]);
       const fm = /^\/files\/([0-9A-Z]{26})(\/ticket)?$/.exec(url.pathname);
       if (fm && ULID_RE.test(fm[1])) {
         if (req.method === 'GET' && !fm[2]) return download(req, res, fm[1], url);

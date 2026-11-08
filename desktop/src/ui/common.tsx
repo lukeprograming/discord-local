@@ -1,4 +1,5 @@
-import type { UserPublic } from '../../../shared/protocol.ts';
+import { useEffect, useRef, useState } from 'react';
+import type { Availability, UserPublic } from '../../../shared/protocol.ts';
 
 const COLORS = ['#5865f2', '#3ba55c', '#faa61a', '#ed4245', '#eb459e', '#00a8fc', '#9b59b6', '#1abc9c'];
 
@@ -8,13 +9,86 @@ function colorFor(id: string): string {
   return COLORS[h % COLORS.length];
 }
 
-export function Avatar({ user, size = 32, online, speaking }: { user?: UserPublic; size?: number; online?: boolean; speaking?: boolean }) {
+const AVAIL_TITLE: Record<Availability, string> = { online: 'Disponível', idle: 'Ausente', dnd: 'Não perturbe' };
+
+export function Avatar({
+  user,
+  size = 32,
+  online,
+  speaking,
+  availability,
+}: {
+  user?: UserPublic;
+  size?: number;
+  online?: boolean;
+  speaking?: boolean;
+  availability?: Availability;
+}) {
   const letter = (user?.display_name ?? '?').trim().charAt(0).toUpperCase();
+  const cls = online ? (availability && availability !== 'online' ? availability : 'on') : 'off';
   return (
     <span className={`avatar ${speaking ? 'speaking' : ''}`} style={{ width: size, height: size, background: user ? colorFor(user.id) : '#4e5058', fontSize: size * 0.42 }}>
       {letter}
-      {online !== undefined && <span className={`presence ${online ? 'on' : 'off'}`} />}
+      {online !== undefined && <span className={`presence ${cls}`} title={online ? AVAIL_TITLE[availability ?? 'online'] : 'Offline'} />}
     </span>
+  );
+}
+
+/** Caixinha de texto no lugar do window.prompt (que o Electron não tem). */
+export function PromptModal({
+  title,
+  initial = '',
+  placeholder,
+  okLabel = 'OK',
+  onOk,
+  onClose,
+  extra,
+}: {
+  title: string;
+  initial?: string;
+  placeholder?: string;
+  okLabel?: string;
+  onOk: (value: string) => Promise<void> | void;
+  onClose: () => void;
+  extra?: React.ReactNode;
+}) {
+  const [v, setV] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => ref.current?.select(), []);
+  async function ok() {
+    if (!v.trim()) return;
+    setBusy(true);
+    try {
+      await onOk(v.trim());
+      onClose();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form
+        className="modal small-modal"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          ok();
+        }}
+      >
+        <h3>{title}</h3>
+        <input ref={ref} value={v} placeholder={placeholder} maxLength={64} onChange={(e) => setV(e.target.value)} />
+        {err && <div className="error">{err}</div>}
+        {extra}
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>Cancelar</button>
+          <button type="submit" className="primary" disabled={busy || !v.trim()}>{okLabel}</button>
+        </div>
+      </form>
+    </div>
   );
 }
 

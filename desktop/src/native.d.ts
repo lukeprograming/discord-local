@@ -53,6 +53,10 @@ export type Settings = {
   hotkey_ptt?: string;
   /** 'ptt' = microfone só abre segurando a tecla. */
   voice_mode?: 'open' | 'ptt';
+  /** Conversas sem notificação (menção ainda avisa). */
+  muted_conversations?: string[];
+  /** Volume do soundboard neste aparelho (0–100). */
+  sound_volume?: number;
   /** Volume do bot de YouTube neste aparelho (0–100). */
   yt_volume?: number;
   /** Volume que eu escolhi para cada pessoa: voz e áudio da transmissão de tela. */
@@ -93,6 +97,8 @@ declare global {
       onFileProgress?(cb: (p: { id: string; done: number; total: number }) => void): () => void;
       info(): Promise<{ platform: string; profile: string; version: string }>;
       flash(): Promise<void>;
+      /** Segundos sem mexer no PC (para o "ausente" automático). */
+      idleSeconds?(): Promise<number>;
       focusMain?(): Promise<void>;
       onChooseScreen(cb: (sources: ScreenSource[]) => void): () => void;
       screenPicked(id: string | null): Promise<void>;

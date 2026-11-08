@@ -1,4 +1,4 @@
-const { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell } = require('electron');
+const { app, BrowserWindow, desktopCapturer, dialog, ipcMain, powerMonitor, session, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { LocalStore } = require('./store.cjs');
@@ -223,6 +223,7 @@ function setupIpc() {
   ipcMain.handle('share-audio:start', (_e, only) => linuxAudio.start(ownPids, only));
   ipcMain.handle('share-audio:stop', () => linuxAudio.stop());
   ipcMain.handle('app:info', () => ({ platform: process.platform, profile, version: app.getVersion() }));
+  ipcMain.handle('app:idle', () => powerMonitor.getSystemIdleTime());
   ipcMain.handle('app:focus', () => {
     if (!win) return;
     if (win.isMinimized()) win.restore();
