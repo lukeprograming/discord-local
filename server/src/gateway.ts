@@ -9,6 +9,8 @@ import type {
   UserStatus,
   Attachment,
   FileAttachment,
+  PollAttachment,
+  ReminderAttachment,
 } from '../../shared/protocol.ts';
 import { MAX_MESSAGE_LENGTH, MAX_VOICE_BASE64, MAX_VOICE_MS, VOICE_PEAKS } from '../../shared/protocol.ts';
 import type { Db } from './db.ts';
@@ -231,7 +233,7 @@ export class Gateway {
       if (mine && t.sender_id !== userId) throw new ClientError('só quem mandou pode mudar a mensagem');
       return id;
     };
-    const kinds = [d.edit_of, d.delete_of, d.reaction].filter((x) => x !== undefined).length;
+    const kinds = [d.edit_of, d.delete_of, d.reaction, d.vote].filter((x) => x !== undefined).length;
     if (kinds > 1) throw new ClientError('mensagem com mudanças demais');
     if (d.attachment && kinds) throw new ClientError('mudança não leva anexo');
     const out: Partial<Message> = {};
@@ -243,11 +245,31 @@ export class Gateway {
       if (!r || typeof r.emoji !== 'string' || !r.emoji || r.emoji.length > 16) throw new ClientError('reação inválida');
       out.reaction = { target: target(r.target, false), emoji: r.emoji, on: !!r.on };
     }
+    if (d.vote !== undefined) {
+      const v = d.vote;
+      const opts = Array.isArray(v?.options) ? v.options : null;
+      if (!opts || opts.length > 10 || !opts.every((n) => Number.isInteger(n) && n >= 0 && n < 10)) throw new ClientError('voto inválido');
+      out.vote = { target: target(v.target, false), options: [...new Set(opts)] };
+    }
     return out;
   }
 
   private attachmentOf(a: unknown, userId: string, conversationId: string, resend = false): Attachment {
-    if ((a as { kind?: string } | null)?.kind !== 'file') return voiceAttachment(a);
+    const kind = (a as { kind?: string } | null)?.kind;
+    if (kind === 'poll') {
+      const p = a as Partial<PollAttachment>;
+      const question = typeof p.question === 'string' ? p.question.trim().slice(0, 200) : '';
+      const options = Array.isArray(p.options) ? p.options.map((o) => (typeof o === 'string' ? o.trim().slice(0, 100) : '')).filter(Boolean) : [];
+      if (!question || options.length < 2 || options.length > 10) throw new ClientError('enquete precisa de pergunta e 2 a 10 opções');
+      return { kind: 'poll', question, options, multi: !!p.multi };
+    }
+    if (kind === 'reminder') {
+      const r = a as Partial<ReminderAttachment>;
+      const text = typeof r.text === 'string' ? r.text.trim().slice(0, 300) : '';
+      if (!text || typeof r.at !== 'number' || !Number.isFinite(r.at)) throw new ClientError('lembrete inválido');
+      return { kind: 'reminder', at: Math.round(r.at), text };
+    }
+    if (kind !== 'file') return voiceAttachment(a);
     const f = this.db.file(String((a as FileAttachment).id));
     if (!f || f.uploader_id !== userId || f.conversation_id !== conversationId) throw new ClientError('arquivo não encontrado');
     if (f.attached && !resend) throw new ClientError('arquivo já enviado');
@@ -423,6 +445,47 @@ export class Gateway {
       for (const id of [conn.user.id, ...this.db.contactIds(conn.user.id)]) {
         this.sendToUser(id, 'status.update', { user_id: conn.user.id, status });
       }
+    },
+
+    'call.activity': (conn, d) => {
+      const conversationId = this.requireMember(d.conversation_id, conn.user.id);
+      if (!this.calls.inCall(conversationId, conn.id)) throw new ClientError('entre na call para jogar');
+      if (d.activity !== 'velha' && d.activity !== 'quadro') throw new ClientError('atividade desconhecida');
+      const event = d.event && typeof d.event === 'object' ? d.event : null;
+      if (!event || JSON.stringify(event).length > 16_000) throw new ClientError('evento inválido');
+      this.calls.activity(conversationId, d.activity, conn.user.id, event);
+      this.sendToMembers(conversationId, 'call.activity', { conversation_id: conversationId, activity: d.activity, event, user_id: conn.user.id });
+    },
+
+    'call.activity.log': (conn, d) => {
+      const conversationId = this.requireMember(d.conversation_id, conn.user.id);
+      return { events: this.calls.activityLog(conversationId, String(d.activity)) };
+    },
+
+    // Pasta compartilhada: o host só repassa entre quem divide alguma conversa.
+    'share.request': (conn, d) => {
+      const to = String(d.to_user_id);
+      if (!this.db.contactIds(conn.user.id).includes(to)) throw new ClientError('pessoa não encontrada');
+      if (!this.isOnline(to)) throw new ClientError('essa pessoa está offline (a pasta fica no PC dela)');
+      if (typeof d.req_id !== 'string' || d.req_id.length > 64) throw new ClientError('pedido inválido');
+      this.sendToUser(to, 'share.request', { from_user_id: conn.user.id, req_id: d.req_id, req: d.req });
+    },
+
+    'share.response': (conn, d) => {
+      const to = String(d.to_user_id);
+      if (!this.db.contactIds(conn.user.id).includes(to)) throw new ClientError('pessoa não encontrada');
+      if (JSON.stringify(d.res ?? null).length > 512_000) throw new ClientError('resposta grande demais');
+      this.sendToUser(to, 'share.response', { from_user_id: conn.user.id, req_id: String(d.req_id), res: d.res });
+    },
+
+    'invite.list': (conn) => {
+      if (!this.db.isAdminId(conn.user.id)) throw new ClientError('só o host vê os convites');
+      return { invites: this.db.listInvites() };
+    },
+
+    'invite.revoke': (conn, d) => {
+      if (!this.db.isAdminId(conn.user.id)) throw new ClientError('só o host revoga convites');
+      if (typeof d.code !== 'string' || !this.db.revokeInvite(d.code)) throw new ClientError('convite não encontrado');
     },
 
     'room.create': (conn, d) => {

@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { Conversation, Friend, FriendStatus, Message, Sound, UserPublic, UserStatus } from '../../shared/protocol.ts';
+import type { Conversation, Friend, FriendStatus, InviteInfo, Message, Sound, UserPublic, UserStatus } from '../../shared/protocol.ts';
 import { ulid } from './ids.ts';
 
 const SCHEMA = `
@@ -308,6 +308,27 @@ export class Db {
       )
       .run(usedBy, Date.now(), code);
     return r.changes === 1;
+  }
+
+  listInvites(): InviteInfo[] {
+    const rows = this.db
+      .prepare(
+        `SELECT i.code, i.created_at, i.max_uses, i.uses, i.revoked, u.display_name AS used_by
+           FROM invites i LEFT JOIN users u ON u.id = i.used_by ORDER BY i.created_at DESC`,
+      )
+      .all() as { code: string; created_at: number; max_uses: number | null; uses: number; revoked: number; used_by: string | null }[];
+    return rows.map((r) => ({
+      code: r.code,
+      created_at: r.created_at,
+      multi_use: r.max_uses === null,
+      uses: r.uses,
+      revoked: !!r.revoked,
+      used_by: r.used_by,
+    }));
+  }
+
+  revokeInvite(code: string): boolean {
+    return this.db.prepare('UPDATE invites SET revoked = 1 WHERE code = ?').run(code).changes > 0;
   }
 
   inviteAvailable(code: string): boolean {

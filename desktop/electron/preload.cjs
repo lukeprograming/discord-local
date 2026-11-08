@@ -9,6 +9,16 @@ contextBridge.exposeInMainWorld('native', {
   saveOutbox: (list) => ipcRenderer.invoke('store:saveOutbox', list),
   openDataDir: () => ipcRenderer.invoke('store:openDataDir'),
   fetchUrl: (url, kind) => ipcRenderer.invoke('net:fetchUrl', url, kind),
+  sharePick: () => ipcRenderer.invoke('share:pick'),
+  shareList: (root, rel) => ipcRenderer.invoke('share:list', root, rel),
+  shareUpload: (root, rel, serverUrl, token, to) => ipcRenderer.invoke('share:upload', root, rel, serverUrl, token, to),
+  shareDownload: (key, url, name) => ipcRenderer.invoke('share:download', key, url, name),
+  shareShow: (p) => ipcRenderer.invoke('share:show', p),
+  onShareProgress: (cb) => {
+    const listener = (_e, p) => cb(p);
+    ipcRenderer.on('share:progress', listener);
+    return () => ipcRenderer.removeListener('share:progress', listener);
+  },
   recStart: (kind, ext) => ipcRenderer.invoke('rec:start', kind, ext),
   recWrite: (id, bytes) => ipcRenderer.invoke('rec:write', id, bytes),
   recFinish: (id) => ipcRenderer.invoke('rec:finish', id),

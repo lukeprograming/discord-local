@@ -265,6 +265,19 @@ window.native = {
   },
   ...fileApi,
   fetchUrl,
+  scheduleNotification: async (id, at, title, body) => {
+    try {
+      if ((await LocalNotifications.checkPermissions()).display !== 'granted') {
+        if ((await LocalNotifications.requestPermissions()).display !== 'granted') return;
+      }
+      // id numérico estável a partir do ULID (o mesmo lembrete não agenda duas vezes).
+      let h = 0;
+      for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) | 0;
+      await LocalNotifications.schedule({ notifications: [{ id: Math.abs(h), title, body, schedule: { at: new Date(at), allowWhileIdle: true } }] });
+    } catch {
+      /* sem notificações */
+    }
+  },
   callActive: (active) => DL.callActive({ active }).catch(() => {}),
   setSpeaker: (on) => DL.setSpeaker({ on }),
 };

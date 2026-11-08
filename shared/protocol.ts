@@ -45,7 +45,22 @@ export type FileAttachment = {
   mime: string;
 };
 
-export type Attachment = VoiceAttachment | FileAttachment;
+/** Enquete: votos chegam como mensagens com `vote` (o último voto de cada um vale). */
+export type PollAttachment = {
+  kind: 'poll';
+  question: string; // até 200
+  options: string[]; // 2 a 10, até 100 cada
+  multi: boolean; // pode marcar várias
+};
+
+/** Lembrete: cada aparelho da conversa avisa na hora marcada. */
+export type ReminderAttachment = {
+  kind: 'reminder';
+  at: number; // ms epoch
+  text: string; // até 300
+};
+
+export type Attachment = VoiceAttachment | FileAttachment | PollAttachment | ReminderAttachment;
 
 export type Message = {
   id: string; // ULID gerado pelo cliente (idempotência do reenvio)
@@ -63,11 +78,13 @@ export type Message = {
   edit_of?: string; // novo texto em content (só o autor)
   delete_of?: string; // só o autor
   reaction?: { target: string; emoji: string; on: boolean };
+  /** Voto numa enquete (índices das opções; vazio = tirou o voto). */
+  vote?: { target: string; options: number[] };
 };
 
 /** Campos que tornam a mensagem uma mudança em outra (não aparece sozinha no chat). */
-export function isMutation(m: Pick<Message, 'edit_of' | 'delete_of' | 'reaction'>): boolean {
-  return !!(m.edit_of || m.delete_of || m.reaction);
+export function isMutation(m: Pick<Message, 'edit_of' | 'delete_of' | 'reaction' | 'vote'>): boolean {
+  return !!(m.edit_of || m.delete_of || m.reaction || m.vote);
 }
 
 export const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥', '👀', '✅'];
@@ -165,6 +182,27 @@ export type Sound = {
 export const MAX_SOUND_BYTES = 1024 * 1024;
 export const MAX_SOUNDS = 60;
 
+/** Convite criado no servidor (lista do host para revogar). */
+export type InviteInfo = {
+  code: string;
+  created_at: number;
+  multi_use: boolean; // embutido em instalador exportado
+  uses: number;
+  revoked: boolean;
+  used_by: string | null; // display_name do último que usou
+};
+
+/** Atividades da call (jogos): o servidor só ordena e guarda o histórico de eventos. */
+export type ActivityName = 'velha' | 'quadro';
+
+/** Pasta compartilhada: pedido que o host repassa ao dono da pasta. */
+export type ShareRequest = { type: 'list'; path: string } | { type: 'get'; path: string };
+export type ShareEntry = { name: string; dir: boolean; size: number; mtime: number };
+export type ShareResponse =
+  | { ok: true; type: 'list'; path: string; entries: ShareEntry[] }
+  | { ok: true; type: 'get'; url: string; name: string; size: number } // url de uso único no host
+  | { ok: false; error: string };
+
 export type ReadyPayload = {
   connection_id: string;
   user: UserPublic;
@@ -197,8 +235,15 @@ export type ClientOps = {
     edit_of?: string;
     delete_of?: string;
     reaction?: { target: string; emoji: string; on: boolean };
+    vote?: { target: string; options: number[] };
   };
   'status.set': { status: UserStatus };
+  'invite.list': Record<string, never>;
+  'call.activity': { conversation_id: string; activity: ActivityName; event: Record<string, unknown> };
+  'call.activity.log': { conversation_id: string; activity: ActivityName };
+  'share.request': { to_user_id: string; req_id: string; req: ShareRequest };
+  'share.response': { to_user_id: string; req_id: string; res: ShareResponse };
+  'invite.revoke': { code: string };
   'room.create': { name: string };
   'room.rename': { conversation_id: string; name: string };
   'room.delete': { conversation_id: string };
@@ -221,6 +266,8 @@ export type ClientOpResults = {
   'group.create': { conversation: Conversation };
   'message.send': { message: Message };
   'room.create': { conversation: Conversation };
+  'invite.list': { invites: InviteInfo[] };
+  'call.activity.log': { events: { event: Record<string, unknown>; user_id: string }[] };
 };
 
 // ---- servidor -> cliente ----
@@ -236,6 +283,9 @@ export type ServerOps = {
   'status.update': { user_id: string; status: UserStatus };
   'conversation.removed': { conversation_id: string };
   'sounds.sync': { sounds: Sound[] };
+  'call.activity': { conversation_id: string; activity: ActivityName; event: Record<string, unknown>; user_id: string };
+  'share.request': { from_user_id: string; req_id: string; req: ShareRequest };
+  'share.response': { from_user_id: string; req_id: string; res: ShareResponse };
   'call.sound': { conversation_id: string; sound_id: string; user_id: string };
   typing: { conversation_id: string; user_id: string };
   'call.update': { call: CallInfo };

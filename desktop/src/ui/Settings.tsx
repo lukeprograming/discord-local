@@ -4,6 +4,7 @@ import { accelFromEvent, hotkeyOf, prettyAccel } from '../hotkeys.ts';
 import { MIC_SAMPLE_RATE, MicProcessor, micConstraints, type NoiseMode } from '../mic.ts';
 import { UpdateSection } from './Update.tsx';
 import type { NetInterface } from '../native.d.ts';
+import type { InviteInfo } from '../../../shared/protocol.ts';
 
 export function Settings({ onClose }: { onClose: () => void }) {
   const profile = useApp((s) => s.profile)!;
@@ -63,6 +64,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
           <>
             <hr />
             <HotkeySection />
+            <hr />
+            <SharedFolderSection />
           </>
         )}
         <hr />
@@ -276,6 +279,50 @@ function HostSection() {
         </p>
       )}
       {error && <div className="error">{error}</div>}
+      {online && <InviteList />}
+    </>
+  );
+}
+
+/** Convites criados (inclusive os embutidos nos instaladores): dá pra revogar. */
+function InviteList() {
+  const [list, setList] = useState<InviteInfo[] | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const load = () => app.listInvites().then(setList).catch((e) => app.toast(e.message));
+  useEffect(() => {
+    load();
+  }, []);
+  if (!list) return null;
+  const active = list.filter((i) => !i.revoked && (i.multi_use || i.uses === 0));
+  const shown = showAll ? list : active;
+  return (
+    <>
+      <h4>Convites</h4>
+      {!shown.length && <p className="muted small">Nenhum convite ativo.</p>}
+      <div className="invite-list">
+        {shown.map((i) => (
+          <div key={i.code} className={`invite ${i.revoked ? 'revoked' : ''}`}>
+            <code>{i.code}</code>
+            <small className="muted">
+              {i.multi_use ? 'instalador exportado' : 'convite de uso único'} · {new Date(i.created_at).toLocaleDateString('pt-BR')} ·{' '}
+              {i.uses ? `usado ${i.uses}x${i.used_by ? ` (último: ${i.used_by})` : ''}` : 'nunca usado'}
+              {i.revoked && ' · revogado'}
+            </small>
+            {!i.revoked && (
+              <button
+                className="mini red"
+                title="Ninguém mais consegue criar conta com esse convite (quem já tem conta continua entrando)"
+                onClick={() => app.revokeInvite(i.code).then(load).catch((e) => app.toast(e.message))}
+              >
+                revogar
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <button className="link" onClick={() => setShowAll(!showAll)}>
+        {showAll ? 'mostrar só os ativos' : 'mostrar todos (usados e revogados)'}
+      </button>
     </>
   );
 }
@@ -411,5 +458,38 @@ function ShortcutField({ label, value, onChange, allowBare }: { label: string; v
         {recording ? 'aperte a combinação… (Esc cancela, ⌫ apaga)' : prettyAccel(value)}
       </button>
     </label>
+  );
+}
+
+function SharedFolderSection() {
+  const folder = useApp((s) => s.profile?.settings?.shared_folder);
+  return (
+    <>
+      <h4>Pasta compartilhada</h4>
+      <p className="muted small">
+        Quem divide conversa com você pode navegar e baixar os arquivos dessa pasta (botão 📁 na conversa), enquanto o app estiver aberto.
+        Arquivos escondidos (começando com ".") ficam de fora.
+      </p>
+      <div className="export-row">
+        <button
+          onClick={async () => {
+            const p = await window.native.sharePick?.();
+            if (p) app.saveSettings({ shared_folder: p });
+          }}
+        >
+          {folder ? 'Trocar pasta…' : '📁 Escolher pasta…'}
+        </button>
+        {folder && (
+          <button className="red" onClick={() => app.saveSettings({ shared_folder: undefined })}>
+            Parar de compartilhar
+          </button>
+        )}
+      </div>
+      {folder && (
+        <p className="small">
+          Compartilhando: <code>{folder}</code>
+        </p>
+      )}
+    </>
   );
 }

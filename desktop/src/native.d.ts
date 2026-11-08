@@ -1,4 +1,4 @@
-import type { Conversation, FileAttachment, Friend, Message, UserPublic } from '../../shared/protocol.ts';
+import type { Conversation, FileAttachment, Friend, Message, ShareEntry, UserPublic } from '../../shared/protocol.ts';
 
 export type HostConfig = {
   ip: string;
@@ -52,6 +52,8 @@ export type Settings = {
   hotkey_deafen?: string;
   hotkey_ptt?: string;
   hotkey_clip?: string;
+  /** Pasta que os amigos podem navegar e baixar (só desktop). */
+  shared_folder?: string;
   /** Volume, só pra mim, do vídeo que estou transmitindo de um arquivo (0–100). */
   video_share_volume?: number;
   /** 'ptt' = microfone só abre segurando a tecla. */
@@ -80,6 +82,13 @@ declare global {
       openDataDir(): Promise<void>;
       /** Prévia de links: busca fora do renderer (CORS). Só https. */
       fetchUrl?(url: string, kind: 'page' | 'image'): Promise<{ type: string; finalUrl: string; text?: string; dataUrl?: string }>;
+      // ---- pasta compartilhada (dono: só desktop) ----
+      sharePick?(): Promise<string | null>;
+      shareList?(root: string, rel: string): Promise<ShareEntry[]>;
+      shareUpload?(root: string, rel: string, serverUrl: string, token: string, to: string): Promise<{ url: string; name: string; size: number }>;
+      shareDownload?(key: string, url: string, name: string): Promise<string>;
+      shareShow?(path: string): Promise<void>;
+      onShareProgress?(cb: (p: { key: string; done: number; total: number }) => void): () => void;
       // ---- gravações e clipes (só desktop) ----
       recStart?(kind: 'gravacao' | 'clipe', ext: string): Promise<{ id: string; path: string }>;
       recWrite?(id: string, bytes: Uint8Array): Promise<void>;
@@ -100,6 +109,8 @@ declare global {
       fileOpen?(path: string): Promise<void>;
       fileShow?(path: string): Promise<void>;
       fileSaveAs?(path: string): Promise<string | null>;
+      /** Celular: notificação agendada pelo sistema (lembretes). */
+      scheduleNotification?(id: string, at: number, title: string, body: string): Promise<void>;
       /** Abre no navegador do aparelho (celular: downloads grandes). */
       openUrl?(url: string): Promise<void>;
       onFileProgress?(cb: (p: { id: string; done: number; total: number }) => void): () => void;

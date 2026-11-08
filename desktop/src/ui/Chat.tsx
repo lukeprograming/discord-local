@@ -2,6 +2,8 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { REACTIONS, type Conversation } from '../../../shared/protocol.ts';
 import { materialize, snippet, type RawMessage, type ViewMessage } from '../messages.ts';
 import { LinkPreviews } from './LinkPreview.tsx';
+import { PollCard, PollModal, ReminderCard, ReminderModal, handleSlash } from './Extras.tsx';
+import { SharedFolder } from './SharedFolder.tsx';
 import { app, useApp } from '../app.ts';
 import { Avatar, formatTime } from './common.tsx';
 import { VoiceMessage, VoiceRecorder } from './Voice.tsx';
@@ -18,6 +20,8 @@ export function Chat({ conversation }: { conversation: Conversation }) {
   const [recording, setRecording] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [extras, setExtras] = useState<null | 'menu' | 'poll' | 'reminder'>(null);
+  const [folderOf, setFolderOf] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -98,6 +102,10 @@ export function Chat({ conversation }: { conversation: Conversation }) {
 
   function submit() {
     if (!text.trim()) return;
+    if (text.trim().startsWith('/') && handleSlash(conversation.id, text)) {
+      setText('');
+      return;
+    }
     app.send(conversation.id, text, replyTo?.id);
     setText('');
     setReplyTo(null);
@@ -183,6 +191,7 @@ export function Chat({ conversation }: { conversation: Conversation }) {
         if (e.dataTransfer.files.length) sendFiles(conversation.id, e.dataTransfer.files);
       }}
     >
+      {folderOf && <SharedFolder userId={folderOf} onClose={() => setFolderOf(null)} />}
       {dragging && <div className="drop-hint">Solte para enviar para {app.conversationTitle(conversation)}</div>}
       <header className="chat-header">
         <button className="icon back-btn" title="Voltar" onClick={() => app.select(null)}>←</button>
@@ -201,6 +210,11 @@ export function Chat({ conversation }: { conversation: Conversation }) {
                 : peer && (s.presences[peer.id] === 'ONLINE' ? peerStatusLine(peer.id) : 'offline')}
           </small>
         </div>
+        {peer && (
+          <button className="icon" title={`Pasta compartilhada de ${peer.display_name}`} disabled={s.connection !== 'online'} onClick={() => setFolderOf(peer.id)}>
+            📁
+          </button>
+        )}
         <button
           className="icon"
           title={app.isMuted(conversation.id) ? 'Ativar notificações' : 'Silenciar conversa (menção com @ ainda avisa)'}
@@ -282,6 +296,10 @@ export function Chat({ conversation }: { conversation: Conversation }) {
                         <VoiceMessage attachment={m.attachment} />
                       ) : m.attachment?.kind === 'file' ? (
                         <FileCard conversationId={conversation.id} attachment={m.attachment} />
+                      ) : m.attachment?.kind === 'poll' ? (
+                        <PollCard conversationId={conversation.id} m={m} poll={m.attachment} />
+                      ) : m.attachment?.kind === 'reminder' ? (
+                        <ReminderCard r={m.attachment} />
                       ) : (
                         <>
                           <Linkify text={m.content} />
@@ -365,6 +383,21 @@ export function Chat({ conversation }: { conversation: Conversation }) {
             e.target.value = '';
           }}
         />
+        {!recording && (
+          <div className="extras-wrap">
+            <button className="attach-btn" title="Enquete / lembrete" onMouseDown={(e) => e.preventDefault()} onClick={() => setExtras(extras === 'menu' ? null : 'menu')}>
+              ➕
+            </button>
+            {extras === 'menu' && (
+              <div className="extras-menu">
+                <button onClick={() => setExtras('poll')}>📊 Enquete <small className="muted">/enquete P? | a | b</small></button>
+                <button onClick={() => setExtras('reminder')}>⏰ Lembrete <small className="muted">/lembrar 20:30 texto</small></button>
+              </div>
+            )}
+          </div>
+        )}
+        {extras === 'poll' && <PollModal conversationId={conversation.id} onClose={() => setExtras(null)} />}
+        {extras === 'reminder' && <ReminderModal conversationId={conversation.id} onClose={() => setExtras(null)} />}
         {!recording && (
           <button
             className="attach-btn"

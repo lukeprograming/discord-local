@@ -11,6 +11,8 @@ const norm = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').to
 function textOf(m: ViewMessage): string {
   if (m.attachment?.kind === 'file') return `📎 ${m.attachment.name}`;
   if (m.attachment?.kind === 'voice') return '';
+  if (m.attachment?.kind === 'poll') return `📊 ${m.attachment.question} ${m.attachment.options.join(' · ')}`;
+  if (m.attachment?.kind === 'reminder') return `⏰ ${m.attachment.text}`;
   return m.content;
 }
 

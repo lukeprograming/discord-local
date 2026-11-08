@@ -12,6 +12,12 @@ import type {
   MediaAction,
   Sound,
   UserStatus,
+  InviteInfo,
+  PollAttachment,
+  ActivityName,
+  ShareRequest,
+  ShareResponse,
+  ClientOps,
 } from '../../shared/protocol.ts';
 import { isMutation, MAX_MESSAGE_LENGTH } from '../../shared/protocol.ts';
 import { GatewayClient, httpPost } from './gateway.ts';
@@ -22,6 +28,7 @@ import { autoDownload, formatSize } from './files.ts';
 import { accelFromEvent, hotkeyOf, mainKey } from './hotkeys.ts';
 import { playSound } from './sounds.ts';
 import { isRecording, saveClip, startVideoFile, stopAllRecording } from './recorder.ts';
+import { scheduleAllReminders, scheduleReminder } from './reminders.ts';
 import type { EmbeddedConfig, HostConfig, HostStatus, Profile, Settings, UpdateStatus } from './native.d.ts';
 
 export function micSettings(s: Settings | undefined): MicSettings {
@@ -220,6 +227,44 @@ class App {
   }
 
   // ---- salas e soundboard ----
+
+  // ---- jogos da call ----
+
+  private activityListeners = new Set<(activity: ActivityName, event: Record<string, unknown>, userId: string) => void>();
+
+  onActivity(cb: (activity: ActivityName, event: Record<string, unknown>, userId: string) => void): () => void {
+    this.activityListeners.add(cb);
+    return () => this.activityListeners.delete(cb);
+  }
+
+  async activityLog(activity: ActivityName): Promise<{ event: Record<string, unknown>; user_id: string }[]> {
+    const call = this.state.call;
+    if (!call) return [];
+    return (await this.requireOnline().request('call.activity.log', { conversation_id: call.conversationId, activity })).events;
+  }
+
+  async sendActivity(activity: ActivityName, event: Record<string, unknown>): Promise<void> {
+    const call = this.state.call;
+    if (!call) throw new Error('Entre numa call para jogar');
+    await this.requireOnline().request('call.activity', { conversation_id: call.conversationId, activity, event });
+  }
+
+  // ---- pasta compartilhada (tratada em src/share.ts) ----
+
+  shareRequest?: (d: { from_user_id: string; req_id: string; req: ShareRequest }) => void;
+  shareResponse?: (d: { from_user_id: string; req_id: string; res: ShareResponse }) => void;
+
+  async shareSend<K extends 'share.request' | 'share.response'>(op: K, d: ClientOps[K]): Promise<void> {
+    await this.requireOnline().request(op, d);
+  }
+
+  async listInvites(): Promise<InviteInfo[]> {
+    return (await this.requireOnline().request('invite.list', {})).invites;
+  }
+
+  async revokeInvite(code: string): Promise<void> {
+    await this.requireOnline().request('invite.revoke', { code });
+  }
 
   async createRoom(name: string): Promise<Conversation> {
     const { conversation } = await this.requireOnline().request('room.create', { name });
@@ -435,6 +480,7 @@ class App {
       });
       this.saveCache();
       this.flushOutbox();
+      scheduleAllReminders();
     });
     gw.on('friends.sync', ({ friends }) => {
       const before = new Set(this.state.friends.filter((f) => f.status === 'INCOMING').map((f) => f.user.id));
@@ -456,6 +502,12 @@ class App {
       this.set({ statuses: { ...this.state.statuses, [user_id]: status } });
     });
     gw.on('sounds.sync', ({ sounds }) => this.set({ sounds }));
+    gw.on('call.activity', (d) => {
+      if (this.state.call?.conversationId !== d.conversation_id) return;
+      for (const l of this.activityListeners) l(d.activity, d.event, d.user_id);
+    });
+    gw.on('share.request', (d) => this.shareRequest?.(d));
+    gw.on('share.response', (d) => this.shareResponse?.(d));
     gw.on('conversation.removed', ({ conversation_id }) => {
       this.set({
         conversations: this.state.conversations.filter((c) => c.id !== conversation_id),
@@ -526,8 +578,8 @@ class App {
     this.set({ profile });
   }
 
-  private notify(title: string, body: string): void {
-    if (this.myStatus().availability === 'dnd') return; // não perturbe
+  notify(title: string, body: string, force = false): void {
+    if (!force && this.myStatus().availability === 'dnd') return; // não perturbe
     if (window.native.notify) {
       // Celular: com o app aberto na frente, a própria tela já mostra.
       if (document.hidden) window.native.notify(title, body);
@@ -562,6 +614,7 @@ class App {
     this.queueAck(message.id);
     if (!fresh.length) return;
     if (message.attachment?.kind === 'file') autoDownload(message.conversation_id, message.attachment);
+    if (message.attachment?.kind === 'reminder') scheduleReminder(message);
     this.addToState(message);
     if (isMutation(message)) return; // edição/apagar/reação: sem notificação nem não lida
     if (message.sender_id !== this.me()?.id && (this.state.selected !== message.conversation_id || !document.hasFocus())) {
@@ -626,6 +679,19 @@ class App {
     return this.enqueue(conversationId, `${on ? 'reagiu' : 'tirou a reação'} ${emoji}`, { reaction: { target, emoji, on } });
   }
 
+  async vote(conversationId: string, target: string, options: number[]): Promise<void> {
+    return this.enqueue(conversationId, options.length ? '🗳 votou na enquete' : '🗳 tirou o voto', { vote: { target, options } });
+  }
+
+  async sendPoll(conversationId: string, poll: PollAttachment): Promise<void> {
+    return this.sendAttachment(conversationId, `📊 Enquete: ${poll.question}\n${poll.options.map((o, i) => `${i + 1}. ${o}`).join('\n')}`, poll);
+  }
+
+  async sendReminder(conversationId: string, at: number, text: string): Promise<void> {
+    const when = new Date(at).toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return this.sendAttachment(conversationId, `⏰ Lembrete para ${when}: ${text}`, { kind: 'reminder', at, text });
+  }
+
   /** Toda mensagem (texto, anexo, mudança) entra na fila local e sai em ordem quando há conexão. */
   private async enqueue(conversationId: string, content: string, extra: Partial<Message>): Promise<void> {
     const me = this.me();
@@ -669,6 +735,7 @@ class App {
             ...(msg.edit_of && { edit_of: msg.edit_of }),
             ...(msg.delete_of && { delete_of: msg.delete_of }),
             ...(msg.reaction && { reaction: msg.reaction }),
+            ...(msg.vote && { vote: msg.vote }),
           });
           await window.native.appendMessages(message.conversation_id, [message]);
           this.addToState(message);

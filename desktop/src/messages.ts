@@ -11,6 +11,8 @@ export type ViewMessage = RawMessage & {
   edited: boolean;
   deleted: boolean;
   reactions: Reaction[];
+  /** Enquete: último voto de cada pessoa (índices). */
+  votes: Record<string, number[]>;
 };
 
 export function materialize(list: RawMessage[], meId: string | undefined): {
@@ -23,7 +25,7 @@ export function materialize(list: RawMessage[], meId: string | undefined): {
 
   for (const m of list) {
     if (!isMutation(m)) {
-      const v: ViewMessage = { ...m, edited: false, deleted: false, reactions: [] };
+      const v: ViewMessage = { ...m, edited: false, deleted: false, reactions: [], votes: {} };
       byId.set(m.id, v);
       visible.push(v);
     }
@@ -40,6 +42,13 @@ export function materialize(list: RawMessage[], meId: string | undefined): {
     } else if (m.delete_of) {
       const t = byId.get(m.delete_of);
       if (t && t.sender_id === m.sender_id) t.deleted = true;
+    } else if (m.vote) {
+      const t = byId.get(m.vote.target);
+      if (t?.attachment?.kind === 'poll') {
+        const n = t.attachment.options.length;
+        const opts = m.vote.options.filter((i) => i < n);
+        t.votes[m.sender_id] = t.attachment.multi ? opts : opts.slice(0, 1);
+      }
     } else if (m.reaction) {
       const { target, emoji, on } = m.reaction;
       let per = reactions.get(target);
@@ -65,6 +74,8 @@ export function snippet(m: Message | undefined): string {
   if (!m) return 'mensagem não encontrada';
   if (m.attachment?.kind === 'voice') return '🎤 mensagem de voz';
   if (m.attachment?.kind === 'file') return `📎 ${m.attachment.name}`;
+  if (m.attachment?.kind === 'poll') return `📊 ${m.attachment.question}`;
+  if (m.attachment?.kind === 'reminder') return `⏰ ${m.attachment.text}`;
   const t = m.content.replace(/\s+/g, ' ');
   return t.length > 90 ? t.slice(0, 90) + '…' : t;
 }

@@ -10,6 +10,7 @@ const { Files } = require('./files.cjs');
 const { fetchUrl } = require('./fetch-url.cjs');
 const { createHotkeys, hasKde } = require('./hotkeys.cjs');
 const { Recordings } = require('./recordings.cjs');
+const share = require('./share.cjs');
 
 // Releases de onde vêm as atualizações e os instaladores limpos para exportar.
 const GITHUB_REPO = 'lukeprograming/discord-local';
@@ -51,6 +52,7 @@ function createWindow() {
     minHeight: 560,
     backgroundColor: '#1e1f22',
     title: profile ? `Discord Local (${profile})` : 'Discord Local',
+    icon: path.join(__dirname, 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -201,6 +203,14 @@ function setupIpc() {
   ipcMain.handle('store:saveOutbox', (_e, list) => store.saveOutbox(list));
   ipcMain.handle('store:dataDir', () => store.dir);
   ipcMain.handle('net:fetchUrl', (_e, url, kind) => fetchUrl(url, kind));
+  // ---- pasta compartilhada ----
+  ipcMain.handle('share:pick', () => share.pickFolder(win));
+  ipcMain.handle('share:list', (_e, root, rel) => share.list(root, rel));
+  ipcMain.handle('share:upload', (_e, root, rel, serverUrl, token, to) => share.upload(root, rel, serverUrl, token, to));
+  ipcMain.handle('share:download', (_e, key, url, name) =>
+    share.download(url, name, (done, total) => win?.webContents.send('share:progress', { key, done, total })),
+  );
+  ipcMain.handle('share:show', (_e, p) => share.show(p));
   // ---- gravações / clipes ----
   ipcMain.handle('rec:start', (_e, kind, ext) => recordings.start(kind, ext));
   ipcMain.handle('rec:write', (_e, id, bytes) => recordings.write(id, bytes));

@@ -7,6 +7,7 @@ import { openMini } from '../mini.ts';
 import { sendFiles } from '../files.ts';
 import { BotPanel, BotPlayer } from './YouTubeBot.tsx';
 import { SoundboardPanel } from './Soundboard.tsx';
+import { GamesPanel } from './Games.tsx';
 import { canRecord, saveClip, setVideoVolume, startClipBuffer, startRecording, stopClipBuffer, stopRecording, useRecorder, type Target } from '../recorder.ts';
 import { hotkeyOf, prettyAccel } from '../hotkeys.ts';
 
@@ -18,6 +19,7 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
   const [botOpen, setBotOpen] = useState(false);
   const [soundsOpen, setSoundsOpen] = useState(false);
   const [recOpen, setRecOpen] = useState(false);
+  const [gamesOpen, setGamesOpen] = useState(false);
   const recState = useRecorder();
   const [focused, setFocused] = useState<string | null>(null); // mostrar só a tela dessa conexão
   const [volumeFor, setVolumeFor] = useState<string | null>(null); // conexão com o popup de volume aberto
@@ -211,6 +213,9 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
             ⏺
           </button>
         )}
+        <button className={`round ${gamesOpen ? 'on' : ''}`} title="Jogos (jogo da velha, quadro)" onClick={() => setGamesOpen(!gamesOpen)}>
+          🎲
+        </button>
         <button className={`round ${soundsOpen ? 'on' : ''}`} title="Soundboard" onClick={() => setSoundsOpen(!soundsOpen)}>
           📢
         </button>
@@ -243,6 +248,7 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
           onClose={() => setRecOpen(false)}
         />
       )}
+      {gamesOpen && <GamesPanel onClose={() => setGamesOpen(false)} />}
       {soundsOpen && <SoundboardPanel onClose={() => setSoundsOpen(false)} />}
       {botOpen && <BotPanel media={media} onClose={() => setBotOpen(false)} />}
       {s.callError && <div className="error">{s.callError}</div>}

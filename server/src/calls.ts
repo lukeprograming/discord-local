@@ -10,6 +10,7 @@ type Call = {
   participants: Map<string, CallParticipant>; // chave: connection_id
   ringTimer?: NodeJS.Timeout;
   media: Omit<MediaState, 'server_time'>;
+  activities: Map<string, { event: Record<string, unknown>; user_id: string }[]>;
 };
 
 /** Estado das calls em memória. Não sabe nada de sockets: quem chama faz o broadcast. */
@@ -42,6 +43,7 @@ export class Calls {
         started_at: Date.now(),
         participants: new Map(),
         media: { queue: [], playing: false, position: 0, updated_at: Date.now() },
+        activities: new Map(),
       };
       this.calls.set(conversationId, call);
     }
@@ -208,6 +210,21 @@ export class Calls {
       default:
         throw new MediaError('comando desconhecido');
     }
+  }
+
+  /** Guarda o evento do jogo (reset/clear zera o histórico). */
+  activity(conversationId: string, name: string, userId: string, event: Record<string, unknown>): void {
+    const call = this.calls.get(conversationId);
+    if (!call) return;
+    let log = call.activities.get(name);
+    if (!log || event.t === 'reset' || event.t === 'clear') call.activities.set(name, (log = []));
+    log.push({ event, user_id: userId });
+    const cap = name === 'quadro' ? 4000 : 500;
+    if (log.length > cap) log.splice(0, log.length - cap);
+  }
+
+  activityLog(conversationId: string, name: string): { event: Record<string, unknown>; user_id: string }[] {
+    return this.calls.get(conversationId)?.activities.get(name) ?? [];
   }
 
   inCall(conversationId: string, connectionId: string): boolean {

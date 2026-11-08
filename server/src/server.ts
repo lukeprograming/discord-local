@@ -211,6 +211,70 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     createReadStream(join(soundsDir, id)).on('error', () => res.destroy()).pipe(res);
   }
 
+  // ---- transferências da pasta compartilhada (link de uso único, apagam depois de baixadas ou em 1 h) ----
+
+  const transfersDir = join(opts.dataDir, 'transferencias');
+  mkdirSync(transfersDir, { recursive: true });
+  const transfers = new Map<string, { name: string; size: number; to: string; exp: number }>();
+  for (const f of readdirSync(transfersDir)) {
+    try {
+      unlinkSync(join(transfersDir, f));
+    } catch {
+      /* ignora */
+    }
+  }
+  const dropTransfer = (id: string) => {
+    transfers.delete(id);
+    try {
+      unlinkSync(join(transfersDir, id));
+    } catch {
+      /* já não existe */
+    }
+  };
+  const transferTimer = setInterval(() => {
+    for (const [id, t] of transfers) if (t.exp < Date.now()) dropTransfer(id);
+  }, 60_000);
+
+  function uploadTransfer(req: IncomingMessage, res: ServerResponse, url: URL) {
+    const user = authUser(req);
+    if (!user) return json(res, 401, { error: 'sessão inválida' });
+    const to = url.searchParams.get('to') ?? '';
+    if (!db.contactIds(user.id).includes(to)) return json(res, 403, { error: 'destinatário inválido' });
+    const name = (url.searchParams.get('name') ?? '').replace(/[\\/\u0000-\u001f]/g, '_').slice(0, 200) || 'arquivo';
+    const size = Number(req.headers['content-length']);
+    if (!Number.isInteger(size) || size < 0) return json(res, 411, { error: 'tamanho ausente' });
+    if (size > MAX_FILE_BYTES) return json(res, 413, { error: 'arquivo grande demais (máx. 2 GB)' });
+    const id = randomBytes(24).toString('base64url');
+    const out = createWriteStream(join(transfersDir, id));
+    let received = 0;
+    req.on('data', (c: Buffer) => (received += c.length));
+    req.on('aborted', () => dropTransfer(id));
+    req.pipe(out);
+    out.on('finish', () => {
+      if (received !== size) {
+        dropTransfer(id);
+        return json(res, 400, { error: 'envio incompleto' });
+      }
+      transfers.set(id, { name, size, to, exp: Date.now() + 3600_000 });
+      json(res, 200, { url: `/transfers/${id}` });
+    });
+  }
+
+  function downloadTransfer(res: ServerResponse, id: string) {
+    const t = transfers.get(id);
+    if (!t) return json(res, 404, { error: 'link expirado ou já usado' });
+    transfers.delete(id); // uso único
+    res.writeHead(200, {
+      'content-type': 'application/octet-stream',
+      'content-length': t.size,
+      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(t.name)}`,
+    });
+    const st = createReadStream(join(transfersDir, id));
+    st.on('error', () => res.destroy());
+    st.pipe(res);
+    res.on('close', () => dropTransfer(id));
+  }
+
   function newTicket(req: IncomingMessage, res: ServerResponse, id: string) {
     const user = authUser(req);
     if (!user) return json(res, 401, { error: 'sessão inválida' });
@@ -276,6 +340,9 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       const url = new URL(req.url ?? '/', 'http://x');
       if (req.method === 'POST' && url.pathname === '/files') return upload(req, res, url);
       if (req.method === 'POST' && url.pathname === '/sounds') return await uploadSound(req, res, url);
+      if (req.method === 'POST' && url.pathname === '/transfers') return uploadTransfer(req, res, url);
+      const tm = /^\/transfers\/([A-Za-z0-9_-]{32})$/.exec(url.pathname);
+      if (tm && req.method === 'GET') return downloadTransfer(res, tm[1]);
       const sm = /^\/sounds\/([0-9A-Z]{26})$/.exec(url.pathname);
       if (sm && req.method === 'GET' && ULID_RE.test(sm[1])) return getSound(req, res, sm[1]);
       const fm = /^\/files\/([0-9A-Z]{26})(\/ticket)?$/.exec(url.pathname);
@@ -312,6 +379,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     close: () =>
       new Promise<void>((resolve) => {
         clearInterval(reapTimer);
+        clearInterval(transferTimer);
         gateway.shutdown();
         wss.close();
         server.close(() => {

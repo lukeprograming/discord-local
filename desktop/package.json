@@ -1,7 +1,7 @@
 {
   "name": "discord-local",
   "productName": "Discord Local",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Chat, call e transmissão de tela privados",
   "author": "Lukeprograming",
   "private": true,
@@ -25,11 +25,13 @@
     },
     "linux": {
       "target": "AppImage",
-      "category": "Network"
+      "category": "Network",
+      "icon": "build/icon.png"
     },
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false
+      "icon": "build/icon.ico",
+      "signExecutable": false
     },
     "nsis": {
       "oneClick": true,
