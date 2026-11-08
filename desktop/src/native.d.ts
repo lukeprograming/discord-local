@@ -22,6 +22,8 @@ export type UpdateStatus = {
   checked_at?: number;
 };
 
+export type HotkeyName = 'mute' | 'deafen' | 'ptt';
+
 export type HostStatus = { running: boolean; url?: string; ip?: string; port?: number };
 
 export type Profile = {
@@ -45,6 +47,12 @@ export type Settings = {
   mic_threshold?: number | null;
   /** Supressão de ruído do microfone. Ausente = padrão (GTCRN). */
   mic_noise?: 'off' | 'native' | 'rnnoise' | 'gtcrn';
+  /** Atalhos (formato do Electron, ex. "CommandOrControl+Shift+M"); '' = desligado. */
+  hotkey_mute?: string;
+  hotkey_deafen?: string;
+  hotkey_ptt?: string;
+  /** 'ptt' = microfone só abre segurando a tecla. */
+  voice_mode?: 'open' | 'ptt';
   /** Volume do bot de YouTube neste aparelho (0–100). */
   yt_volume?: number;
   /** Volume que eu escolhi para cada pessoa: voz e áudio da transmissão de tela. */
@@ -63,6 +71,14 @@ declare global {
       loadOutbox(): Promise<Message[]>;
       saveOutbox(list: Message[]): Promise<void>;
       openDataDir(): Promise<void>;
+      /** Prévia de links: busca fora do renderer (CORS). Só https. */
+      fetchUrl?(url: string, kind: 'page' | 'image'): Promise<{ type: string; finalUrl: string; text?: string; dataUrl?: string }>;
+      /** 'kde' = global com apertar e soltar (push-to-talk global); 'basic' = só apertar. */
+      hotkeysKind?(): Promise<'kde' | 'basic'>;
+      /** Devolve os que não deu pra registrar (tecla já usada, inválida…). */
+      hotkeysSet?(bindings: Partial<Record<HotkeyName, string>>): Promise<HotkeyName[]>;
+      hotkeysClear?(): Promise<void>;
+      onHotkey?(cb: (h: { name: HotkeyName; pressed: boolean }) => void): () => void;
       // ---- arquivos do chat (caminho local = onde o arquivo está guardado no aparelho) ----
       pathForFile?(file: File): string | null;
       fileLocal?(convId: string, att: FileAttachment): Promise<string | null>;

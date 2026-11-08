@@ -11,12 +11,13 @@ import type {
   Attachment,
   MediaAction,
 } from '../../shared/protocol.ts';
-import { MAX_MESSAGE_LENGTH } from '../../shared/protocol.ts';
+import { isMutation, MAX_MESSAGE_LENGTH } from '../../shared/protocol.ts';
 import { GatewayClient, httpPost } from './gateway.ts';
 import { CallSession, type AudioKind, type ScreenPreset } from './rtc.ts';
 import { DEFAULT_NOISE, type MicSettings } from './mic.ts';
 import { ulid } from './ulid.ts';
 import { autoDownload, formatSize } from './files.ts';
+import { accelFromEvent, hotkeyOf, mainKey } from './hotkeys.ts';
 import type { EmbeddedConfig, HostConfig, HostStatus, Profile, Settings, UpdateStatus } from './native.d.ts';
 
 export function micSettings(s: Settings | undefined): MicSettings {
@@ -437,6 +438,7 @@ class App {
     if (!fresh.length) return;
     if (message.attachment?.kind === 'file') autoDownload(message.conversation_id, message.attachment);
     this.addToState(message);
+    if (isMutation(message)) return; // edição/apagar/reação: sem notificação nem não lida
     if (message.sender_id !== this.me()?.id && (this.state.selected !== message.conversation_id || !document.hasFocus())) {
       if (this.state.selected !== message.conversation_id) {
         const unread = { ...this.state.unread, [message.conversation_id]: (this.state.unread[message.conversation_id] ?? 0) + 1 };
@@ -475,12 +477,33 @@ class App {
     }, 300);
   }
 
-  async send(conversationId: string, text: string): Promise<void> {
+  async send(conversationId: string, text: string, replyTo?: string): Promise<void> {
     const content = text.trim();
-    const me = this.me();
-    if (!content || !me) return;
+    if (!content) return;
     if (content.length > MAX_MESSAGE_LENGTH) return this.toast(`Mensagem longa demais (máx. ${MAX_MESSAGE_LENGTH})`);
-    const msg: Message = { id: ulid(), conversation_id: conversationId, sender_id: me.id, content, created_at: Date.now() };
+    return this.enqueue(conversationId, content, replyTo ? { reply_to: replyTo } : {});
+  }
+
+  async editMessage(conversationId: string, id: string, text: string): Promise<void> {
+    const content = text.trim();
+    if (!content) return this.deleteMessage(conversationId, id);
+    if (content.length > MAX_MESSAGE_LENGTH) return this.toast(`Mensagem longa demais (máx. ${MAX_MESSAGE_LENGTH})`);
+    return this.enqueue(conversationId, content, { edit_of: id });
+  }
+
+  async deleteMessage(conversationId: string, id: string): Promise<void> {
+    return this.enqueue(conversationId, '🗑 (apagou uma mensagem)', { delete_of: id });
+  }
+
+  async react(conversationId: string, target: string, emoji: string, on: boolean): Promise<void> {
+    return this.enqueue(conversationId, `${on ? 'reagiu' : 'tirou a reação'} ${emoji}`, { reaction: { target, emoji, on } });
+  }
+
+  /** Toda mensagem (texto, anexo, mudança) entra na fila local e sai em ordem quando há conexão. */
+  private async enqueue(conversationId: string, content: string, extra: Partial<Message>): Promise<void> {
+    const me = this.me();
+    if (!me) return;
+    const msg: Message = { id: ulid(), conversation_id: conversationId, sender_id: me.id, content, created_at: Date.now(), ...extra };
     const outbox = [...this.state.outbox, msg];
     this.set({ outbox });
     await window.native.saveOutbox(outbox);
@@ -499,13 +522,7 @@ class App {
   }
 
   private async sendAttachment(conversationId: string, content: string, attachment: Attachment): Promise<void> {
-    const me = this.me();
-    if (!me) return;
-    const msg: Message = { id: ulid(), conversation_id: conversationId, sender_id: me.id, content, created_at: Date.now(), attachment };
-    const outbox = [...this.state.outbox, msg];
-    this.set({ outbox });
-    await window.native.saveOutbox(outbox);
-    this.flushOutbox();
+    return this.enqueue(conversationId, content, { attachment });
   }
 
   /** Envia a fila em ordem. Para no primeiro erro de rede; tenta de novo ao reconectar. */
@@ -521,6 +538,10 @@ class App {
             conversation_id: msg.conversation_id,
             content: msg.content,
             ...(msg.attachment && { attachment: msg.attachment }),
+            ...(msg.reply_to && { reply_to: msg.reply_to }),
+            ...(msg.edit_of && { edit_of: msg.edit_of }),
+            ...(msg.delete_of && { delete_of: msg.delete_of }),
+            ...(msg.reaction && { reaction: msg.reaction }),
           });
           await window.native.appendMessages(message.conversation_id, [message]);
           this.addToState(message);
@@ -613,12 +634,88 @@ class App {
     // Se o call.update chegou antes do microfone ficar pronto, sincroniza agora.
     const info = this.state.calls[conversationId];
     if (info) session.sync(info);
+    await this.applyHotkeys();
+  }
+
+  // ---- atalhos e push-to-talk ----
+
+  private pttDown = false;
+  private hotkeysInstalled = false;
+
+  /** Registra os atalhos globais (só enquanto estou numa call). No modo push-to-talk entra mutado. */
+  async applyHotkeys(): Promise<void> {
+    const s = this.state.profile?.settings;
+    const call = this.state.call;
+    this.installHotkeyListeners();
+    if (!call) {
+      await window.native.hotkeysClear?.();
+      return;
+    }
+    const ptt = s?.voice_mode === 'ptt';
+    if (ptt && !call.noMic && !this.pttDown && !call.muted) {
+      call.setMuted(true);
+      this.pushCallState();
+    }
+    const failed =
+      (await window.native.hotkeysSet?.({
+        mute: hotkeyOf(s, 'mute'),
+        deafen: hotkeyOf(s, 'deafen'),
+        ...(ptt && { ptt: hotkeyOf(s, 'ptt') }),
+      })) ?? [];
+    const kind = await window.native.hotkeysKind?.();
+    const real = failed.filter((n) => !(n === 'ptt' && kind === 'basic')); // no Windows o ptt é só com o app em foco, já avisado
+    if (real.length) this.toast(`Atalho não registrado (já usado por outro app?): ${real.join(', ')}`);
+  }
+
+  private installHotkeyListeners(): void {
+    if (this.hotkeysInstalled) return;
+    this.hotkeysInstalled = true;
+    window.native.onHotkey?.(({ name, pressed }) => {
+      if (!this.state.call) return;
+      if (name === 'ptt') this.setPtt(pressed);
+      else if (pressed && name === 'mute') this.toggleMute();
+      else if (pressed && name === 'deafen') this.toggleDeafen();
+    });
+    // Push-to-talk com o app em foco (vale em qualquer sistema; no KDE também é global).
+    const isPtt = (e: KeyboardEvent) => {
+      const s = this.state.profile?.settings;
+      const key = hotkeyOf(s, 'ptt');
+      if (s?.voice_mode !== 'ptt' || !key || !this.state.call) return false;
+      if ((e.target as HTMLElement)?.closest?.('textarea, input, [contenteditable]') && !/\+/.test(key) && key.length === 1) return false; // tecla de letra solta: deixa digitar
+      return e.type === 'keyup' ? mainKey(accelFromEvent(e) ?? '') === mainKey(key) : accelFromEvent(e) === key;
+    };
+    window.addEventListener('keydown', (e) => {
+      if (!e.repeat && isPtt(e)) this.setPtt(true);
+    });
+    window.addEventListener('keyup', (e) => {
+      if (isPtt(e)) this.setPtt(false);
+    });
+    // Perdeu o foco segurando a tecla: não deixa o microfone aberto (o global do KDE continua valendo).
+    window.addEventListener('blur', () => {
+      if (this.pttDown && window.native.hotkeysKind) window.native.hotkeysKind().then((k) => k === 'basic' && this.setPtt(false));
+    });
+  }
+
+  setPtt(down: boolean): void {
+    const call = this.state.call;
+    if (!call || call.noMic || this.pttDown === down) return;
+    if (this.state.profile?.settings?.voice_mode !== 'ptt') return;
+    this.pttDown = down;
+    if (down && call.deafened) return;
+    call.setMuted(!down);
+    this.pushCallState();
+  }
+
+  get pttActive(): boolean {
+    return this.pttDown;
   }
 
   leaveCall(notify = true): void {
     const s = this.state.call;
     if (!s) return;
     s.close();
+    this.pttDown = false;
+    window.native.hotkeysClear?.();
     window.native.callActive?.(false);
     if (notify) this.gw?.emit('call.leave', { conversation_id: s.conversationId });
     this.set({ call: null, stage: 'normal' });

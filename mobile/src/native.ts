@@ -6,7 +6,7 @@
 // ├── outbox.json           mensagens escritas e ainda não confirmadas pelo servidor
 // └── conversas/<id>.jsonl  uma mensagem por linha, só cresce (append)
 
-import { registerPlugin } from '@capacitor/core';
+import { CapacitorHttp, registerPlugin } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { LocalNotifications } from '@capacitor/local-notifications';
@@ -184,6 +184,31 @@ const fileApi = {
   openUrl: (url: string) => DL.openUrl({ url }),
 };
 
+// ---- prévia de links (HTTP nativo: sem CORS) ----
+
+const PREVIEW_UA = 'Mozilla/5.0 (compatible; DiscordLocal-LinkPreview/1.0; +https://github.com/lukeprograming/discord-local)';
+
+async function fetchUrl(url: string, kind: 'page' | 'image') {
+  if (!url.startsWith('https://')) throw new Error('só https');
+  const headers = { 'User-Agent': PREVIEW_UA };
+  // HEAD antes: não baixar vídeo/arquivo grande só pra prévia.
+  const head = await CapacitorHttp.request({ method: 'HEAD', url, headers, connectTimeout: 7000, readTimeout: 7000 }).catch(() => null);
+  const len = Number(head?.headers?.['Content-Length'] ?? head?.headers?.['content-length'] ?? 0);
+  if (len > 8 * 1024 * 1024) throw new Error('grande demais');
+  const res = await CapacitorHttp.get({ url, headers, responseType: 'arraybuffer', connectTimeout: 7000, readTimeout: 7000 });
+  if (res.status >= 400) throw new Error(`HTTP ${res.status}`);
+  const h = res.headers ?? {};
+  const type = String(h['Content-Type'] ?? h['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+  const b64 = String(res.data ?? '');
+  if (b64.length > 11 * 1024 * 1024) throw new Error('grande demais');
+  if (type.startsWith('image/')) return { type, finalUrl: res.url ?? url, dataUrl: `data:${type};base64,${b64}` };
+  if (kind === 'image' || !/html|xml/.test(type)) return { type, finalUrl: res.url ?? url };
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { type, finalUrl: res.url ?? url, text: new TextDecoder().decode(bytes) };
+}
+
 const noHost: HostStatus = { running: false };
 const unsupported = () => Promise.reject(new Error('Indisponível no celular — use o app do computador.'));
 
@@ -239,6 +264,7 @@ window.native = {
     return () => updateListeners.delete(cb);
   },
   ...fileApi,
+  fetchUrl,
   callActive: (active) => DL.callActive({ active }).catch(() => {}),
   setSpeaker: (on) => DL.setSpeaker({ on }),
 };

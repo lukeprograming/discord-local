@@ -7,6 +7,8 @@ const embed = require('./embed.cjs');
 const updater = require('./updater.cjs');
 const linuxAudio = require('./linux-audio.cjs');
 const { Files } = require('./files.cjs');
+const { fetchUrl } = require('./fetch-url.cjs');
+const { createHotkeys, hasKde } = require('./hotkeys.cjs');
 
 // Releases de onde vêm as atualizações e os instaladores limpos para exportar.
 const GITHUB_REPO = 'lukeprograming/discord-local';
@@ -196,6 +198,15 @@ function setupIpc() {
   ipcMain.handle('store:loadOutbox', () => store.loadOutbox());
   ipcMain.handle('store:saveOutbox', (_e, list) => store.saveOutbox(list));
   ipcMain.handle('store:dataDir', () => store.dir);
+  ipcMain.handle('net:fetchUrl', (_e, url, kind) => fetchUrl(url, kind));
+  // ---- atalhos globais (só enquanto estou numa call) ----
+  const hotkeys = createHotkeys((name, pressed) => win?.webContents.send('hotkey', { name, pressed }));
+  ipcMain.handle('hotkeys:kind', () => (hasKde() ? 'kde' : 'basic'));
+  ipcMain.handle('hotkeys:set', (_e, bindings) => hotkeys.set(bindings));
+  ipcMain.handle('hotkeys:clear', () => hotkeys.clear());
+  app.on('will-quit', () => {
+    hotkeys.clear();
+  });
   // ---- arquivos do chat ----
   ipcMain.handle('file:local', (_e, convId, att) => files.local(convId, att));
   ipcMain.handle('file:download', (_e, serverUrl, token, convId, att) => files.download(serverUrl, token, convId, att));

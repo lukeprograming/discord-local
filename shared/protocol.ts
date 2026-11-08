@@ -53,7 +53,23 @@ export type Message = {
   content: string; // nas de voz: texto de reserva para versões antigas e notificações
   created_at: number; // ms epoch, carimbado pelo servidor ao receber
   attachment?: Attachment;
+  /** Resposta a outra mensagem (id). */
+  reply_to?: string;
+  /**
+   * Mudanças em mensagens já enviadas também viajam como mensagens (o histórico é local e
+   * só cresce): o app aplica por cima da original. `content` vira texto de reserva.
+   */
+  edit_of?: string; // novo texto em content (só o autor)
+  delete_of?: string; // só o autor
+  reaction?: { target: string; emoji: string; on: boolean };
 };
+
+/** Campos que tornam a mensagem uma mudança em outra (não aparece sozinha no chat). */
+export function isMutation(m: Pick<Message, 'edit_of' | 'delete_of' | 'reaction'>): boolean {
+  return !!(m.edit_of || m.delete_of || m.reaction);
+}
+
+export const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥', '👀', '✅'];
 
 export type CallParticipant = {
   user_id: string;
@@ -144,7 +160,16 @@ export type ClientOps = {
   'friend.accept': { user_id: string };
   'friend.remove': { user_id: string };
   'group.create': { name: string; member_ids: string[] };
-  'message.send': { id: string; conversation_id: string; content: string; attachment?: Attachment };
+  'message.send': {
+    id: string;
+    conversation_id: string;
+    content: string;
+    attachment?: Attachment;
+    reply_to?: string;
+    edit_of?: string;
+    delete_of?: string;
+    reaction?: { target: string; emoji: string; on: boolean };
+  };
   /** Controle do bot de YouTube da call (todos na call podem mexer). */
   'call.media': { conversation_id: string; action: MediaAction };
   'mailbox.ack': { ids: string[] };

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { app, errorMessage, micSettings, useApp } from '../app.ts';
+import { accelFromEvent, hotkeyOf, prettyAccel } from '../hotkeys.ts';
 import { MIC_SAMPLE_RATE, MicProcessor, micConstraints, type NoiseMode } from '../mic.ts';
 import { UpdateSection } from './Update.tsx';
 import type { NetInterface } from '../native.d.ts';
@@ -58,6 +59,12 @@ export function Settings({ onClose }: { onClose: () => void }) {
           </label>
         )}
         <p className="muted small">Trocar de dispositivo vale a partir da próxima call (volume e sensibilidade valem na hora).</p>
+        {!mobile && (
+          <>
+            <hr />
+            <HotkeySection />
+          </>
+        )}
         <hr />
         {profile.role === 'host' ? <HostSection /> : (
           <p className="small">
@@ -329,5 +336,79 @@ function NetworkPicker() {
       )}
       {error && <div className="error">{error}</div>}
     </>
+  );
+}
+
+function HotkeySection() {
+  const settings = useApp((s) => s.profile?.settings);
+  const [kind, setKind] = useState<'kde' | 'basic' | null>(null);
+  useEffect(() => {
+    window.native.hotkeysKind?.().then(setKind);
+  }, []);
+  const ptt = settings?.voice_mode === 'ptt';
+
+  async function save(patch: Parameters<typeof app.saveSettings>[0]) {
+    await app.saveSettings(patch);
+    if (app.state.call) await app.applyHotkeys();
+  }
+
+  return (
+    <>
+      <h4>Atalhos e modo de voz</h4>
+      <label className="check">
+        <input type="radio" checked={!ptt} onChange={() => save({ voice_mode: 'open' })} />
+        Microfone aberto <small className="muted">(com a sensibilidade de cima)</small>
+      </label>
+      <label className="check">
+        <input type="radio" checked={ptt} onChange={() => save({ voice_mode: 'ptt' })} />
+        Apertar para falar <small className="muted">(o microfone só abre segurando a tecla)</small>
+      </label>
+      {ptt && (
+        <ShortcutField label="Tecla de falar" value={hotkeyOf(settings, 'ptt')} allowBare onChange={(v) => save({ hotkey_ptt: v })} />
+      )}
+      <ShortcutField label="Silenciar / ativar microfone" value={hotkeyOf(settings, 'mute')} onChange={(v) => save({ hotkey_mute: v })} />
+      <ShortcutField label="Ensurdecer" value={hotkeyOf(settings, 'deafen')} onChange={(v) => save({ hotkey_deafen: v })} />
+      <p className="muted small">
+        {kind === 'kde'
+          ? 'Os atalhos funcionam mesmo com um jogo em foco (registrados no KDE como "Discord Local", só enquanto você está numa call).'
+          : 'Silenciar e ensurdecer funcionam mesmo com um jogo em foco (só enquanto você está numa call). Apertar para falar funciona com o app em foco.'}
+        {ptt && !hotkeyOf(settings, 'ptt') && ' Escolha a tecla de falar.'}
+      </p>
+    </>
+  );
+}
+
+/** Campo que grava uma combinação de teclas ao clicar. */
+function ShortcutField({ label, value, onChange, allowBare }: { label: string; value: string; onChange: (v: string) => void; allowBare?: boolean }) {
+  const [recording, setRecording] = useState(false);
+  return (
+    <label className="shortcut-field">
+      <span>{label}</span>
+      <button
+        type="button"
+        className={recording ? 'recording' : ''}
+        onClick={() => setRecording(true)}
+        onBlur={() => setRecording(false)}
+        onKeyDown={(e) => {
+          if (!recording) return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.key === 'Escape') return setRecording(false);
+          if (e.key === 'Backspace' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+            onChange('');
+            return setRecording(false);
+          }
+          const a = accelFromEvent(e);
+          if (!a) return; // só modificador por enquanto
+          const bare = !a.includes('+');
+          // Atalho de alternar sem modificador roubaria a tecla de todo mundo; no "falar" pode (ex.: F13, `).
+          if (bare && !allowBare && !/^F\d+$/.test(a)) return;
+          onChange(a);
+          setRecording(false);
+        }}
+      >
+        {recording ? 'aperte a combinação… (Esc cancela, ⌫ apaga)' : prettyAccel(value)}
+      </button>
+    </label>
   );
 }

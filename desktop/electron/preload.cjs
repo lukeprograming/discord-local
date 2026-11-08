@@ -8,6 +8,15 @@ contextBridge.exposeInMainWorld('native', {
   loadOutbox: () => ipcRenderer.invoke('store:loadOutbox'),
   saveOutbox: (list) => ipcRenderer.invoke('store:saveOutbox', list),
   openDataDir: () => ipcRenderer.invoke('store:openDataDir'),
+  fetchUrl: (url, kind) => ipcRenderer.invoke('net:fetchUrl', url, kind),
+  hotkeysKind: () => ipcRenderer.invoke('hotkeys:kind'),
+  hotkeysSet: (bindings) => ipcRenderer.invoke('hotkeys:set', bindings),
+  hotkeysClear: () => ipcRenderer.invoke('hotkeys:clear'),
+  onHotkey: (cb) => {
+    const listener = (_e, h) => cb(h);
+    ipcRenderer.on('hotkey', listener);
+    return () => ipcRenderer.removeListener('hotkey', listener);
+  },
   // ---- arquivos do chat ----
   pathForFile: (file) => {
     try {

@@ -196,6 +196,30 @@ export class Gateway {
     else this.sendToMembers(conversationId, 'call.update', { call: this.calls.info(conversationId)! });
   }
 
+  /** Resposta / edição / apagar / reação: confere que o alvo é dessa conversa (e do autor, quando precisa). */
+  private messageExtras(d: ClientOps['message.send'], conversationId: string, userId: string): Partial<Message> {
+    const target = (id: unknown, mine: boolean) => {
+      if (typeof id !== 'string' || !ULID_RE.test(id)) throw new ClientError('mensagem alvo inválida');
+      const t = this.db.existingMessage(id);
+      if (!t || t.conversation_id !== conversationId) throw new ClientError('mensagem alvo não encontrada');
+      if (mine && t.sender_id !== userId) throw new ClientError('só quem mandou pode mudar a mensagem');
+      return id;
+    };
+    const kinds = [d.edit_of, d.delete_of, d.reaction].filter((x) => x !== undefined).length;
+    if (kinds > 1) throw new ClientError('mensagem com mudanças demais');
+    if (d.attachment && kinds) throw new ClientError('mudança não leva anexo');
+    const out: Partial<Message> = {};
+    if (d.reply_to !== undefined) out.reply_to = target(d.reply_to, false);
+    if (d.edit_of !== undefined) out.edit_of = target(d.edit_of, true);
+    if (d.delete_of !== undefined) out.delete_of = target(d.delete_of, true);
+    if (d.reaction !== undefined) {
+      const r = d.reaction;
+      if (!r || typeof r.emoji !== 'string' || !r.emoji || r.emoji.length > 16) throw new ClientError('reação inválida');
+      out.reaction = { target: target(r.target, false), emoji: r.emoji, on: !!r.on };
+    }
+    return out;
+  }
+
   private attachmentOf(a: unknown, userId: string, conversationId: string, resend = false): Attachment {
     if ((a as { kind?: string } | null)?.kind !== 'file') return voiceAttachment(a);
     const f = this.db.file(String((a as FileAttachment).id));
@@ -286,10 +310,29 @@ export class Gateway {
       const attachment = d.attachment === undefined ? undefined : this.attachmentOf(d.attachment, conn.user.id, conversationId, !!prev);
       if (prev) {
         if (prev.sender_id !== conn.user.id) throw new ClientError('id de mensagem em uso');
-        return { message: { id: d.id, conversation_id: prev.conversation_id, sender_id: prev.sender_id, content, created_at: prev.created_at, ...(attachment && { attachment }) } };
+        return {
+          message: {
+            id: d.id,
+            conversation_id: prev.conversation_id,
+            sender_id: prev.sender_id,
+            content,
+            created_at: prev.created_at,
+            ...(attachment && { attachment }),
+            ...this.messageExtras(d, prev.conversation_id, conn.user.id),
+          },
+        };
       }
 
-      const message: Message = { id: d.id, conversation_id: conversationId, sender_id: conn.user.id, content, created_at: Date.now(), ...(attachment && { attachment }) };
+      const extra = this.messageExtras(d, conversationId, conn.user.id);
+      const message: Message = {
+        id: d.id,
+        conversation_id: conversationId,
+        sender_id: conn.user.id,
+        content,
+        created_at: Date.now(),
+        ...(attachment && { attachment }),
+        ...extra,
+      };
       const recipients = this.db.memberIds(conversationId).filter((u) => u !== conn.user.id);
       this.db.tx(() => {
         this.db.storeMessage(message, recipients);
