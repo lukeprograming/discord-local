@@ -11,6 +11,7 @@ const { fetchUrl } = require('./fetch-url.cjs');
 const { createHotkeys, hasKde } = require('./hotkeys.cjs');
 const { Recordings } = require('./recordings.cjs');
 const share = require('./share.cjs');
+const { TurnServer, routeIp, preferredVpnIp } = require('./turn.cjs');
 
 // Releases de onde vêm as atualizações e os instaladores limpos para exportar.
 const GITHUB_REPO = 'lukeprograming/discord-local';
@@ -41,6 +42,9 @@ let win = null;
 let store = null;
 let files = null;
 let recordings = null;
+// Retransmissor pros celulares da mesma casa (o WebRTC do Android não usa a VPN).
+const turn = new TurnServer();
+let turnStarted = null;
 let pendingPick = null; // callback do setDisplayMediaRequestHandler aguardando o seletor
 let quitting = false; // saída já em andamento (não segurar no before-quit)
 
@@ -256,6 +260,13 @@ function setupIpc() {
       w.loadURL('https://accounts.spotify.com/login?continue=' + encodeURIComponent('https://open.spotify.com/'));
     }),
   );
+  // ---- retransmissor TURN ----
+  ipcMain.handle('turn:info', async (_e, hostIp) => {
+    turnStarted ??= turn.start(3478);
+    if (!(await turnStarted)) return null;
+    turn.relayIp = (hostIp && (await routeIp(hostIp))) || preferredVpnIp();
+    return turn.info();
+  });
   // ---- pasta compartilhada ----
   ipcMain.handle('share:pick', () => share.pickFolder(win));
   ipcMain.handle('share:list', (_e, root, rel) => share.list(root, rel));
@@ -472,6 +483,7 @@ app.whenReady().then(() => {
 });
 
 app.on('will-quit', () => {
+  turn.stop();
   linuxAudio.stopSync();
   recordings?.closeAll();
 });

@@ -15,6 +15,7 @@ import type {
   InviteInfo,
   PollAttachment,
   ActivityName,
+  TurnServerInfo,
   ShareRequest,
   ShareResponse,
   ClientOps,
@@ -96,6 +97,8 @@ export type State = {
   admin: boolean;
   /** Mensagem para rolar até quando a conversa abrir (vinda da busca). */
   jumpTo: { conversationId: string; messageId: string } | null;
+  /** Retransmissores TURN dos PCs conectados. */
+  turnServers: TurnServerInfo[];
 };
 
 type Listener = () => void;
@@ -132,6 +135,7 @@ class App {
     sounds: [],
     admin: false,
     jumpTo: null,
+    turnServers: [],
   };
 
   private listeners = new Set<Listener>();
@@ -217,6 +221,23 @@ class App {
     }, 30_000);
   }
 
+  /**
+   * Celular com a tela apagada/app em segundo plano: o Android dá menos CPU ao app e a
+   * supressão de ruído por IA atrasa (voz abafada/picotada). Troca pela nativa enquanto
+   * estiver escondido e volta a IA quando o app reaparece.
+   */
+  private watchBackground(): void {
+    if (!/Android/i.test(navigator.userAgent)) return;
+    document.addEventListener('visibilitychange', () => {
+      const call = this.state.call;
+      if (!call) return;
+      const s = micSettings(this.state.profile?.settings);
+      const heavy = s.noise === 'gtcrn' || s.noise === 'rnnoise';
+      if (document.hidden && heavy) call.setMicSettings({ ...s, noise: 'native' });
+      else call.setMicSettings(s);
+    });
+  }
+
   mentionsMe(text: string): boolean {
     const me = this.me();
     if (!me) return false;
@@ -255,6 +276,26 @@ class App {
   }
 
   // ---- salas e soundboard ----
+
+  /** PC: liga o retransmissor e anuncia pros outros (os celulares da casa usam). */
+  private async announceTurn(): Promise<void> {
+    if (!window.native.turnInfo || !this.state.profile) return;
+    try {
+      const host = new URL(this.state.profile.server_url).hostname;
+      const info = await window.native.turnInfo(host);
+      if (!info) return;
+      await this.gw?.request('turn.announce', { urls: info.urls, username: info.username, credential: info.credential });
+    } catch (e) {
+      console.warn('[turn] anúncio', e);
+    }
+  }
+
+  /** iceServers para as conexões da call: retransmissores dos outros PCs. */
+  iceServers(): RTCIceServer[] {
+    return this.state.turnServers
+      .filter((t) => t.connection_id !== this.state.connectionId)
+      .map((t) => ({ urls: t.urls, username: t.username, credential: t.credential }));
+  }
 
   // ---- jogos da call ----
 
@@ -350,6 +391,7 @@ class App {
     ]);
     window.native.onUpdateStatus((u) => this.set({ update: u }));
     this.watchIdle();
+    this.watchBackground();
     const profile = stored && { ...stored, role: stored.role ?? 'client' };
     // Offline-first: mostra o que está no cache antes de qualquer rede.
     this.set({
@@ -506,7 +548,9 @@ class App {
         statuses: d.statuses ?? {},
         sounds: d.sounds ?? [],
         admin: !!d.admin,
+        turnServers: d.turn ?? [],
       });
+      this.announceTurn();
       this.saveCache();
       this.flushOutbox();
       scheduleAllReminders();
@@ -531,6 +575,7 @@ class App {
       this.set({ statuses: { ...this.state.statuses, [user_id]: status } });
     });
     gw.on('sounds.sync', ({ sounds }) => this.set({ sounds }));
+    gw.on('turn.list', ({ servers }) => this.set({ turnServers: servers }));
     gw.on('call.activity', (d) => {
       if (this.state.call?.conversationId !== d.conversation_id) return;
       for (const l of this.activityListeners) l(d.activity, d.event, d.user_id);
@@ -869,6 +914,7 @@ class App {
       mic: micSettings(s),
       playback: this.state.platform === 'android' ? 'element' : 'webaudio',
       volumeOf: (userId, kind) => this.userVolume(userId, kind),
+      iceServers: () => this.iceServers(),
     });
     // Depois do microfone: o Android só deixa o serviço usar o mic se a permissão já foi dada.
     window.native.callActive?.(true);

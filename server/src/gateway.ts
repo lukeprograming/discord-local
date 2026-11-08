@@ -7,6 +7,7 @@ import type {
   UserPublic,
   VoiceAttachment,
   UserStatus,
+  TurnServerInfo,
   Attachment,
   FileAttachment,
   PollAttachment,
@@ -155,6 +156,7 @@ export class Gateway {
       statuses,
       sounds: this.db.sounds(),
       admin: this.db.isAdminId(user.id),
+      turn: [...this.turns.values()],
     });
     // Entrega o que ficou na caixa de correio enquanto estava offline.
     for (const message of this.db.mailboxFor(user.id)) this.send(conn, 'message.created', { message });
@@ -167,6 +169,7 @@ export class Gateway {
     // Desligando: o banco pode já estar fechado, e ninguém mais recebe presença.
     if (this.stopping) return;
     this.conns.delete(conn.id);
+    if (this.turns.delete(conn.id)) this.broadcastTurns();
     if (!conn.user) return;
     const set = this.byUser.get(conn.user.id);
     set?.delete(conn.id);
@@ -204,6 +207,13 @@ export class Gateway {
   }
 
   private lastSound = new Map<string, number>(); // conexão -> último som (anti-spam)
+  /** Retransmissores TURN anunciados pelos PCs conectados (conexão -> info). */
+  private turns = new Map<string, TurnServerInfo>();
+
+  private broadcastTurns(): void {
+    const servers = [...this.turns.values()];
+    for (const c of this.conns.values()) if (c.user) this.send(c, 'turn.list', { servers });
+  }
   /** O servidor HTTP apaga o arquivo do som. */
   onSoundDeleted?: (id: string) => void;
 
@@ -476,6 +486,13 @@ export class Gateway {
       if (!this.db.contactIds(conn.user.id).includes(to)) throw new ClientError('pessoa não encontrada');
       if (JSON.stringify(d.res ?? null).length > 512_000) throw new ClientError('resposta grande demais');
       this.sendToUser(to, 'share.response', { from_user_id: conn.user.id, req_id: String(d.req_id), res: d.res });
+    },
+
+    'turn.announce': (conn, d) => {
+      const urls = Array.isArray(d.urls) ? d.urls.filter((u) => typeof u === 'string' && /^turns?:[\w.:\[\]-]+(\?transport=(udp|tcp))?$/.test(u)).slice(0, 12) : [];
+      if (!urls.length || typeof d.username !== 'string' || typeof d.credential !== 'string') throw new ClientError('retransmissor inválido');
+      this.turns.set(conn.id, { connection_id: conn.id, user_id: conn.user.id, urls, username: d.username.slice(0, 64), credential: d.credential.slice(0, 128) });
+      this.broadcastTurns();
     },
 
     'invite.list': (conn) => {

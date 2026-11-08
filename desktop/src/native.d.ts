@@ -89,6 +89,8 @@ declare global {
       openDataDir(): Promise<void>;
       /** Prévia de links: busca fora do renderer (CORS). Só https. */
       fetchUrl?(url: string, kind: 'page' | 'image'): Promise<{ type: string; finalUrl: string; text?: string; dataUrl?: string }>;
+      /** PC: liga o retransmissor TURN e devolve como os outros o usam (null = não deu). */
+      turnInfo?(hostIp: string): Promise<{ urls: string[]; username: string; credential: string; relayIp: string } | null>;
       // ---- Spotify (só desktop): sessão usada pelo player embutido ----
       spotifyLogin?(): Promise<boolean>;
       spotifyStatus?(): Promise<boolean>;

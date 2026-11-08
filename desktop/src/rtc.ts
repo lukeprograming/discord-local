@@ -32,6 +32,8 @@ export type CallOptions = {
   playback: 'webaudio' | 'element';
   /** Volume (1 = 100%) que eu escolhi para essa pessoa. */
   volumeOf: (userId: string, kind: AudioKind) => number;
+  /** Retransmissores TURN disponíveis (lidos na hora de criar cada conexão). */
+  iceServers?: () => RTCIceServer[];
 };
 
 export type CallDiagnostics = {
@@ -520,8 +522,15 @@ export class CallSession {
 
   private createPeer(connectionId: string, userId: string, rebuilds = 0): Peer {
     log('createPeer', connectionId.slice(-4), 'mic=' + !!this.mic);
-    // Pela VPN todos os peers têm IP direto: sem STUN/TURN.
-    const pc = new RTCPeerConnection({ iceServers: [] });
+    // PCs têm IP direto pela VPN. Celulares não usam a VPN no WebRTC: passam pelo
+    // retransmissor (TURN) do PC da mesma casa, que repassa pela VPN.
+    let relayOnly = false;
+    try {
+      relayOnly = localStorage.getItem('dl-relay-only') === '1'; // teste: força passar pelo retransmissor
+    } catch {
+      /* sem storage */
+    }
+    const pc = new RTCPeerConnection({ iceServers: this.opts.iceServers?.() ?? [], iceTransportPolicy: relayOnly ? 'relay' : 'all' });
     const peer: Peer = {
       pc,
       userId,

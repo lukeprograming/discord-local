@@ -217,6 +217,15 @@ export type ShareResponse =
   | { ok: true; type: 'get'; url: string; name: string; size: number } // url de uso único no host
   | { ok: false; error: string };
 
+/** Retransmissor TURN de um PC (os celulares usam o da mesma casa pra falar com as outras). */
+export type TurnServerInfo = {
+  connection_id: string;
+  user_id: string;
+  urls: string[];
+  username: string;
+  credential: string;
+};
+
 export type ReadyPayload = {
   connection_id: string;
   user: UserPublic;
@@ -228,6 +237,7 @@ export type ReadyPayload = {
   sounds?: Sound[];
   /** Sou o admin (host): posso criar/renomear/apagar salas. */
   admin?: boolean;
+  turn?: TurnServerInfo[];
 };
 
 // ---- cliente -> servidor (comandos com `rid` recebem `ack`) ----
@@ -252,6 +262,7 @@ export type ClientOps = {
     vote?: { target: string; options: number[] };
   };
   'status.set': { status: UserStatus };
+  'turn.announce': { urls: string[]; username: string; credential: string };
   'invite.list': Record<string, never>;
   'call.activity': { conversation_id: string; activity: ActivityName; event: Record<string, unknown> };
   'call.activity.log': { conversation_id: string; activity: ActivityName };
@@ -297,6 +308,7 @@ export type ServerOps = {
   'status.update': { user_id: string; status: UserStatus };
   'conversation.removed': { conversation_id: string };
   'sounds.sync': { sounds: Sound[] };
+  'turn.list': { servers: TurnServerInfo[] };
   'call.activity': { conversation_id: string; activity: ActivityName; event: Record<string, unknown>; user_id: string };
   'share.request': { from_user_id: string; req_id: string; req: ShareRequest };
   'share.response': { from_user_id: string; req_id: string; res: ShareResponse };

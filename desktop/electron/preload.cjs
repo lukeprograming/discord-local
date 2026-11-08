@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('native', {
   saveOutbox: (list) => ipcRenderer.invoke('store:saveOutbox', list),
   openDataDir: () => ipcRenderer.invoke('store:openDataDir'),
   fetchUrl: (url, kind) => ipcRenderer.invoke('net:fetchUrl', url, kind),
+  turnInfo: (hostIp) => ipcRenderer.invoke('turn:info', hostIp),
   spotifyLogin: () => ipcRenderer.invoke('spotify:login'),
   spotifyStatus: () => ipcRenderer.invoke('spotify:status'),
   spotifyLogout: () => ipcRenderer.invoke('spotify:logout'),
