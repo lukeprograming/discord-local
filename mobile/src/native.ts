@@ -21,6 +21,7 @@ const DL = registerPlugin<{
   callActive(o: { active: boolean }): Promise<void>;
   setSpeaker(o: { on: boolean }): Promise<void>;
   openUrl(o: { url: string }): Promise<void>;
+  localAddresses(): Promise<{ addresses: { name: string; ip: string }[] }>;
 }>('DLNative');
 
 const REPO = 'lukeprograming/discord-local';
@@ -282,5 +283,6 @@ window.native = {
     }
   },
   callActive: (active) => DL.callActive({ active }).catch(() => {}),
+  localAddresses: () => DL.localAddresses().then((r) => r.addresses).catch(() => []),
   setSpeaker: (on) => DL.setSpeaker({ on }),
 };

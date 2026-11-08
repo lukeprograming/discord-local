@@ -171,7 +171,9 @@ export type RtcSignal =
   | { type: 'offer' | 'answer'; sdp: string }
   | { type: 'candidate'; candidate: IceCandidate | null }
   /** Diz qual stream é a câmera (o resto do vídeo é tela). */
-  | { type: 'streams'; camera: string | null };
+  | { type: 'streams'; camera: string | null }
+  /** A conexão travou: os dois lados jogam fora e criam outra do zero. */
+  | { type: 'reset' };
 
 export type Availability = 'online' | 'idle' | 'dnd';
 

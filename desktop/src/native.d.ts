@@ -120,6 +120,8 @@ declare global {
       fileOpen?(path: string): Promise<void>;
       fileShow?(path: string): Promise<void>;
       fileSaveAs?(path: string): Promise<string | null>;
+      /** Celular: IPs reais do aparelho (para trocar os nomes .local nas conexões diretas). */
+      localAddresses?(): Promise<{ name: string; ip: string }[]>;
       /** Celular: notificação agendada pelo sistema (lembretes). */
       scheduleNotification?(id: string, at: number, title: string, body: string): Promise<void>;
       /** Abre no navegador do aparelho (celular: downloads grandes). */

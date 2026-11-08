@@ -7,6 +7,12 @@ import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import androidx.core.content.ContextCompat;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.util.Collections;
+import com.getcapacitor.JSArray;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -52,6 +58,33 @@ public class DLNativePlugin extends Plugin {
             audio.setSpeakerphoneOn(on);
         }
         call.resolve();
+    }
+
+    /**
+     * IPs reais do aparelho (Wi-Fi, VPN como ZeroTier/Tailscale, dados móveis).
+     * O WebView esconde o IP local nas conexões diretas (nome .local), que não funciona pela VPN;
+     * o app usa esta lista para mandar os endereços de verdade aos outros.
+     */
+    @PluginMethod
+    public void localAddresses(PluginCall call) {
+        JSArray list = new JSArray();
+        try {
+            for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!ni.isUp() || ni.isLoopback()) continue;
+                for (InetAddress a : Collections.list(ni.getInetAddresses())) {
+                    if (!(a instanceof Inet4Address) || a.isLoopbackAddress() || a.isLinkLocalAddress()) continue;
+                    JSObject o = new JSObject();
+                    o.put("name", ni.getName());
+                    o.put("ip", a.getHostAddress());
+                    list.put(o);
+                }
+            }
+        } catch (Exception e) {
+            // sem lista: segue só com o que o WebView mandar
+        }
+        JSObject ret = new JSObject();
+        ret.put("addresses", list);
+        call.resolve(ret);
     }
 
     @PluginMethod

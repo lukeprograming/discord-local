@@ -550,3 +550,12 @@ button.danger { background: var(--red); color: white; }
 .screen-tile.tile-fs video { width: 100vw; height: 100vh; object-fit: contain; }
 .screen-tile.tile-fs .bot-video { position: absolute; inset: 0; }
 body.has-tile-fs { overflow: hidden; }
+.diag-panel { max-width: 760px; }
+.diag-panel .bot-panel-head .muted { flex: 1; }
+.diag-block { display: flex; flex-direction: column; gap: 2px; background: var(--bg-2); border-radius: 8px; padding: 8px 10px; }
+.diag-line { font-size: 13px; padding-left: 14px; position: relative; }
+.diag-line::before { content: '•'; position: absolute; left: 2px; color: var(--muted); }
+.diag-line.ok::before { content: '✓'; color: var(--green); }
+.diag-line.warn::before { content: '!'; color: #f0b232; font-weight: 800; }
+.diag-line.bad::before { content: '✗'; color: var(--red); }
+.diag-mono { font: 11px ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; color: var(--muted); max-height: 200px; overflow: auto; }

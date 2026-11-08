@@ -34,6 +34,35 @@ export type CallOptions = {
   volumeOf: (userId: string, kind: AudioKind) => number;
 };
 
+export type CallDiagnostics = {
+  mic: {
+    found: boolean;
+    label: string;
+    state: string;
+    muted: boolean;
+    deafened: boolean;
+    sending: boolean;
+    context: string;
+    processing: string;
+    level: number | null;
+    echo: boolean | null;
+    localIps: string[];
+  };
+  peers: {
+    userId: string;
+    connection: string;
+    ice: string;
+    gathering: string;
+    pair: string;
+    local: string[];
+    remote: string[];
+    outKbps: number | null;
+    inKbps: number | null;
+    inLevel: number;
+  }[];
+  log: string[];
+};
+
 type RemoteAudio = {
   stream: MediaStream;
   el: HTMLAudioElement;
@@ -58,11 +87,18 @@ type Peer = {
   queue: Promise<void>; // sinais processados em ordem, um de cada vez
   watchdog: number;
   restarts: number;
+  /** Endereços próprios descobertos (0 por muito tempo = conexão travada). */
+  localCands: number;
+  /** Já esperou a primeira oferta do outro lado. */
+  waitedOffer?: boolean;
+  /** Quantas vezes esta conexão já foi recriada do zero. */
+  rebuilds: number;
 };
 
 const SPEAKING_THRESHOLD = 0.02;
 const ICE_WATCHDOG_MS = 8000;
 const MAX_ICE_RESTARTS = 3;
+const MAX_REBUILDS = 4;
 
 // Histórico da negociação, para depurar pelo DevTools: window.__rtclog
 const rtcLog: string[] = ((window as unknown as { __rtclog: string[] }).__rtclog = []);
@@ -111,8 +147,11 @@ export class CallSession {
   }
 
   /** Sem microfone a call continua funcionando só para ouvir (e ver/transmitir tela). Devolve o erro do microfone, se houve. */
+  private localIps: string[] = [];
+
   async start(opts: CallOptions): Promise<Error | null> {
     this.opts = opts;
+    this.localIps = ((await window.native.localAddresses?.().catch(() => [])) ?? []).map((a) => a.ip);
     if (opts.playback === 'webaudio' && opts.speakerId) {
       const ctx = this.audioCtx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
       await ctx.setSinkId?.(opts.speakerId).catch((e) => console.warn('[rtc] saída', e));
@@ -190,6 +229,12 @@ export class CallSession {
       this.onChange();
       return;
     }
+    if (signal.type === 'reset') {
+      // O outro lado recriou a conexão dele: recria a minha também (sem avisar de volta).
+      log('reset pedido por', fromConnectionId.slice(-4));
+      this.rebuildPeer(fromConnectionId, peer.userId, peer.rebuilds, false);
+      return;
+    }
     const pc = peer.pc;
     try {
       if (signal.type === 'candidate') {
@@ -213,6 +258,72 @@ export class CallSession {
       log('erro', signal.type, (e as Error).message);
       console.error('[rtc] sinal', signal.type, e);
     }
+  }
+
+  // ---- diagnóstico (🩺 na call) ----
+
+  private lastBytes = new Map<string, { at: number; out: number; in: number }>();
+
+  /** Fotografia da call para o painel de diagnóstico (e para copiar e mandar pra quem ajuda). */
+  async diagnostics(): Promise<CallDiagnostics> {
+    const track = this.mic?.getAudioTracks()[0];
+    const settings = track?.getSettings();
+    const mic: CallDiagnostics['mic'] = {
+      found: !this.noMic,
+      label: track?.label ?? '',
+      state: track?.readyState ?? 'sem microfone',
+      muted: this.muted,
+      deafened: this.deafened,
+      sending: !!this.send?.getAudioTracks()[0]?.enabled,
+      context: this.audioCtx.state,
+      processing: this.micProc ? (this.micProc.activeNoise as string) : 'nenhum',
+      level: this.micProc ? Math.round(this.micProc.db) : null,
+      echo: typeof settings?.echoCancellation === 'boolean' ? settings.echoCancellation : null,
+      localIps: this.localIps,
+    };
+    const peers: CallDiagnostics['peers'] = [];
+    for (const [connId, p] of this.peers) {
+      const st = await p.pc.getStats();
+      const local: string[] = [];
+      const remote: string[] = [];
+      const byId = new Map<string, Record<string, unknown>>();
+      st.forEach((r) => byId.set(r.id, r as Record<string, unknown>));
+      let pair = '';
+      let out = 0;
+      let inn = 0;
+      let inLevel = 0;
+      const cand = (r: Record<string, unknown> | undefined) =>
+        r ? `${r.candidateType} ${r.address || '?'}:${r.port}${r.networkType ? ` (${r.networkType})` : ''}` : '?';
+      st.forEach((r: Record<string, unknown>) => {
+        if (r.type === 'local-candidate') local.push(cand(r));
+        if (r.type === 'remote-candidate') remote.push(cand(r));
+        if (r.type === 'candidate-pair' && (r.nominated || r.selected) && r.state === 'succeeded') {
+          pair = `${cand(byId.get(r.localCandidateId as string))} ⇄ ${cand(byId.get(r.remoteCandidateId as string))} · rtt ${Math.round(((r.currentRoundTripTime as number) ?? 0) * 1000)} ms`;
+        }
+        if (r.type === 'outbound-rtp' && r.kind === 'audio') out += (r.bytesSent as number) ?? 0;
+        if (r.type === 'inbound-rtp' && r.kind === 'audio') {
+          inn += (r.bytesReceived as number) ?? 0;
+          inLevel = Math.max(inLevel, (r.audioLevel as number) ?? 0);
+        }
+      });
+      const now = performance.now();
+      const prev = this.lastBytes.get(connId);
+      this.lastBytes.set(connId, { at: now, out, in: inn });
+      const kbps = (b: number, a: number) => (prev && now > prev.at ? Math.round(((b - a) * 8) / (now - prev.at)) : null);
+      peers.push({
+        userId: p.userId,
+        connection: p.pc.connectionState,
+        ice: p.pc.iceConnectionState,
+        gathering: p.pc.iceGatheringState,
+        pair: pair || 'nenhum caminho funcionando ainda',
+        local: [...new Set(local)],
+        remote: [...new Set(remote)],
+        outKbps: kbps(out, prev?.out ?? 0),
+        inKbps: kbps(inn, prev?.in ?? 0),
+        inLevel: Math.round(inLevel * 100),
+      });
+    }
+    return { mic, peers, log: rtcLog.slice(-40) };
   }
 
   setMuted(muted: boolean): void {
@@ -407,7 +518,7 @@ export class CallSession {
   private screenCfg: { bitrate: number; fps: number } | null = null;
   private screenLinuxAudio = false;
 
-  private createPeer(connectionId: string, userId: string): Peer {
+  private createPeer(connectionId: string, userId: string, rebuilds = 0): Peer {
     log('createPeer', connectionId.slice(-4), 'mic=' + !!this.mic);
     // Pela VPN todos os peers têm IP direto: sem STUN/TURN.
     const pc = new RTCPeerConnection({ iceServers: [] });
@@ -426,11 +537,26 @@ export class CallSession {
       queue: Promise.resolve(),
       watchdog: 0,
       restarts: 0,
+      localCands: 0,
+      rebuilds,
     };
     this.peers.set(connectionId, peer);
     this.armWatchdog(peer);
 
     pc.onnegotiationneeded = async () => {
+      // Primeira negociação: só o lado "não educado" oferece; o outro espera a oferta dele.
+      // Duas ofertas cruzadas (colisão) deixavam a conexão do celular sem coletar endereços.
+      if (peer.polite && !pc.remoteDescription && !pc.localDescription && !peer.waitedOffer) {
+        peer.waitedOffer = true;
+        log('espera a oferta de', connectionId.slice(-4));
+        // Se a oferta não vier (outro lado antigo/travado), oferece mesmo assim.
+        window.setTimeout(() => {
+          if (this.peers.get(connectionId) === peer && !pc.remoteDescription && !pc.localDescription && pc.signalingState === 'stable') {
+            pc.onnegotiationneeded?.(new Event('negotiationneeded'));
+          }
+        }, 3000);
+        return;
+      }
       try {
         peer.makingOffer = true;
         await pc.setLocalDescription();
@@ -442,7 +568,22 @@ export class CallSession {
         peer.makingOffer = false;
       }
     };
-    pc.onicecandidate = ({ candidate }) => this.signal(connectionId, { type: 'candidate', candidate: candidate?.toJSON() ?? null });
+    pc.onicecandidate = ({ candidate }) => {
+      if (candidate) peer.localCands++;
+      const c = candidate?.toJSON() ?? null;
+      // Celular: o WebView esconde o IP atrás de um nome .local (não funciona pela VPN).
+      // Manda também o mesmo candidato com cada IP real do aparelho; os que não servirem são ignorados.
+      const parts = c?.candidate?.split(' ');
+      if (c && parts && parts.length > 5 && parts[4].endsWith('.local') && this.localIps.length) {
+        for (const ip of this.localIps) {
+          const copy = [...parts];
+          copy[4] = ip;
+          this.signal(connectionId, { type: 'candidate', candidate: { ...c, candidate: copy.join(' ') } });
+        }
+        log('cand .local trocado por', this.localIps.join(','));
+      }
+      this.signal(connectionId, { type: 'candidate', candidate: c });
+    };
     pc.onsignalingstatechange = () => log('signaling', pc.signalingState);
     pc.onconnectionstatechange = () => {
       log('conn', pc.connectionState);
@@ -552,12 +693,29 @@ export class CallSession {
     clearTimeout(peer.watchdog);
     peer.watchdog = window.setTimeout(() => {
       if (this.closed || peer.pc.connectionState === 'connected' || peer.pc.connectionState === 'closed') return;
-      if (peer.restarts >= MAX_ICE_RESTARTS) return;
+      const connId = [...this.peers.entries()].find(([, p]) => p === peer)?.[0];
+      if (!connId) return;
+      // Nenhum endereço próprio descoberto: essa conexão não se recupera (nem com restartIce).
+      // Joga fora e cria outra do zero, avisando o outro lado pra fazer o mesmo.
+      if ((peer.localCands === 0 && peer.pc.localDescription) || peer.restarts >= MAX_ICE_RESTARTS) {
+        if (peer.rebuilds >= MAX_REBUILDS) return;
+        log('watchdog: recriando conexão', 'locais=' + peer.localCands, 'restarts=' + peer.restarts);
+        this.rebuildPeer(connId, peer.userId, peer.rebuilds + 1, true);
+        return;
+      }
       peer.restarts++;
       log('watchdog: restartIce', peer.restarts, peer.pc.connectionState);
       peer.pc.restartIce();
       this.armWatchdog(peer);
     }, ICE_WATCHDOG_MS);
+  }
+
+  /** Conexão nova no lugar da travada (mesma pessoa). `tell`: avisa o outro lado pra recriar também. */
+  private rebuildPeer(connectionId: string, userId: string, rebuilds: number, tell: boolean): void {
+    this.closePeer(connectionId);
+    if (tell) this.signal(connectionId, { type: 'reset' });
+    this.createPeer(connectionId, userId, rebuilds);
+    this.onChange();
   }
 
   private closePeer(connectionId: string): void {
