@@ -368,6 +368,7 @@ function HotkeySection() {
       )}
       <ShortcutField label="Silenciar / ativar microfone" value={hotkeyOf(settings, 'mute')} onChange={(v) => save({ hotkey_mute: v })} />
       <ShortcutField label="Ensurdecer" value={hotkeyOf(settings, 'deafen')} onChange={(v) => save({ hotkey_deafen: v })} />
+      <ShortcutField label="Salvar clipe" value={hotkeyOf(settings, 'clip')} onChange={(v) => save({ hotkey_clip: v })} />
       <p className="muted small">
         {kind === 'kde'
           ? 'Os atalhos funcionam mesmo com um jogo em foco (registrados no KDE como "Discord Local", só enquanto você está numa call).'

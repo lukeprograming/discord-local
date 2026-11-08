@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { app, useApp } from '../app.ts';
 import type { Availability, Conversation } from '../../../shared/protocol.ts';
 import { Avatar, PromptModal } from './common.tsx';
 import { Settings } from './Settings.tsx';
+import { Search } from './Search.tsx';
 import { UpdateBanner } from './Update.tsx';
 
 export function Sidebar() {
@@ -11,6 +12,18 @@ export function Sidebar() {
   const [grouping, setGrouping] = useState(false);
   const [settings, setSettings] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  // Ctrl+K / Ctrl+Shift+F abrem a busca de qualquer lugar.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'k' || (e.shiftKey && e.key.toLowerCase() === 'f'))) {
+        e.preventDefault();
+        setSearching(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [roomPrompt, setRoomPrompt] = useState<{ mode: 'create' } | { mode: 'rename'; room: Conversation } | null>(null);
   const me = s.profile!.user;
   const myStatus = app.myStatus();
@@ -191,6 +204,7 @@ export function Sidebar() {
             <small className="muted">{myStatus.text || myStatus.emoji ? `${myStatus.emoji} ${myStatus.text}` : `@${me.username}`}</small>
           </div>
         </button>
+        <button className="icon" title="Buscar mensagens (Ctrl+K)" onClick={() => setSearching(true)}>🔍</button>
         <button className="icon" title="Configurações" onClick={() => setSettings(true)}>⚙</button>
       </div>
 
@@ -198,6 +212,7 @@ export function Sidebar() {
       {grouping && <CreateGroup onClose={() => setGrouping(false)} />}
       {settings && <Settings onClose={() => setSettings(false)} />}
       {statusOpen && <StatusEditor onClose={() => setStatusOpen(false)} />}
+      {searching && <Search onClose={() => setSearching(false)} />}
       {roomPrompt?.mode === 'create' && (
         <PromptModal
           title="Nova sala"

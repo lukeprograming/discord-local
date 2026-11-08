@@ -10,7 +10,7 @@ const { execFile, spawn } = require('node:child_process');
 const { globalShortcut } = require('electron');
 
 const COMPONENT = 'discord-local';
-const NAMES = { mute: 'Silenciar microfone', deafen: 'Ensurdecer', ptt: 'Apertar para falar' };
+const NAMES = { mute: 'Silenciar microfone', deafen: 'Ensurdecer', ptt: 'Apertar para falar', clip: 'Salvar clipe' };
 
 // ---- acelerador do Electron ("CommandOrControl+Shift+M") <-> código de tecla do Qt ----
 

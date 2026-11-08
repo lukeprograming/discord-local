@@ -21,6 +21,7 @@ import { ulid } from './ulid.ts';
 import { autoDownload, formatSize } from './files.ts';
 import { accelFromEvent, hotkeyOf, mainKey } from './hotkeys.ts';
 import { playSound } from './sounds.ts';
+import { isRecording, saveClip, startVideoFile, stopAllRecording } from './recorder.ts';
 import type { EmbeddedConfig, HostConfig, HostStatus, Profile, Settings, UpdateStatus } from './native.d.ts';
 
 export function micSettings(s: Settings | undefined): MicSettings {
@@ -78,6 +79,8 @@ export type State = {
   statuses: Record<string, UserStatus>;
   sounds: Sound[];
   admin: boolean;
+  /** Mensagem para rolar até quando a conversa abrir (vinda da busca). */
+  jumpTo: { conversationId: string; messageId: string } | null;
 };
 
 type Listener = () => void;
@@ -113,6 +116,7 @@ class App {
     statuses: {},
     sounds: [],
     admin: false,
+    jumpTo: null,
   };
 
   private listeners = new Set<Listener>();
@@ -238,6 +242,15 @@ class App {
 
   async deleteSound(id: string): Promise<void> {
     await this.requireOnline().request('sound.delete', { id });
+  }
+
+  async openMessage(conversationId: string, messageId: string): Promise<void> {
+    await this.select(conversationId);
+    this.set({ jumpTo: { conversationId, messageId } });
+  }
+
+  clearJump(): void {
+    if (this.state.jumpTo) this.set({ jumpTo: null });
   }
 
   userByUsername(username: string): UserPublic | undefined {
@@ -774,6 +787,7 @@ class App {
       (await window.native.hotkeysSet?.({
         mute: hotkeyOf(s, 'mute'),
         deafen: hotkeyOf(s, 'deafen'),
+        ...(window.native.recStart && { clip: hotkeyOf(s, 'clip') }),
         ...(ptt && { ptt: hotkeyOf(s, 'ptt') }),
       })) ?? [];
     const kind = await window.native.hotkeysKind?.();
@@ -789,6 +803,7 @@ class App {
       if (name === 'ptt') this.setPtt(pressed);
       else if (pressed && name === 'mute') this.toggleMute();
       else if (pressed && name === 'deafen') this.toggleDeafen();
+      else if (pressed && name === 'clip') saveClip().catch((e) => this.toast((e as Error).message));
     });
     // Push-to-talk com o app em foco (vale em qualquer sistema; no KDE também é global).
     const isPtt = (e: KeyboardEvent) => {
@@ -827,6 +842,7 @@ class App {
   leaveCall(notify = true): void {
     const s = this.state.call;
     if (!s) return;
+    stopAllRecording();
     s.close();
     this.pttDown = false;
     window.native.hotkeysClear?.();
@@ -852,6 +868,7 @@ class App {
       muted: s.muted,
       deafened: s.deafened,
       screen_sharing: !!s.screen,
+      recording: isRecording(),
     });
     this.bump();
   }
@@ -938,6 +955,22 @@ class App {
     const call = this.state.call;
     if (!call) throw new Error('Entre numa call para usar o bot');
     await this.requireOnline().request('call.media', { conversation_id: call.conversationId, action });
+  }
+
+  /** Gravação começou/parou: os outros veem o aviso. */
+  recordingChanged(): void {
+    this.pushCallState();
+  }
+
+  async startVideoShare(file: File, preset: ScreenPreset): Promise<void> {
+    try {
+      await startVideoFile(file, preset);
+      this.saveSettings({ screen_preset: preset });
+    } catch (e) {
+      this.toast((e as Error).message);
+      return;
+    }
+    this.pushCallState();
   }
 
   stopScreen(): void {

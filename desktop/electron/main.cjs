@@ -9,6 +9,7 @@ const linuxAudio = require('./linux-audio.cjs');
 const { Files } = require('./files.cjs');
 const { fetchUrl } = require('./fetch-url.cjs');
 const { createHotkeys, hasKde } = require('./hotkeys.cjs');
+const { Recordings } = require('./recordings.cjs');
 
 // Releases de onde vêm as atualizações e os instaladores limpos para exportar.
 const GITHUB_REPO = 'lukeprograming/discord-local';
@@ -38,6 +39,7 @@ app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
 let win = null;
 let store = null;
 let files = null;
+let recordings = null;
 let pendingPick = null; // callback do setDisplayMediaRequestHandler aguardando o seletor
 let quitting = false; // saída já em andamento (não segurar no before-quit)
 
@@ -199,6 +201,11 @@ function setupIpc() {
   ipcMain.handle('store:saveOutbox', (_e, list) => store.saveOutbox(list));
   ipcMain.handle('store:dataDir', () => store.dir);
   ipcMain.handle('net:fetchUrl', (_e, url, kind) => fetchUrl(url, kind));
+  // ---- gravações / clipes ----
+  ipcMain.handle('rec:start', (_e, kind, ext) => recordings.start(kind, ext));
+  ipcMain.handle('rec:write', (_e, id, bytes) => recordings.write(id, bytes));
+  ipcMain.handle('rec:finish', (_e, id) => recordings.finish(id));
+  ipcMain.handle('rec:show', (_e, p) => recordings.show(p));
   // ---- atalhos globais (só enquanto estou numa call) ----
   const hotkeys = createHotkeys((name, pressed) => win?.webContents.send('hotkey', { name, pressed }));
   ipcMain.handle('hotkeys:kind', () => (hasKde() ? 'kde' : 'basic'));
@@ -392,6 +399,7 @@ async function exportConnector(platform, cfg, pickAgain) {
 app.whenReady().then(() => {
   store = new LocalStore(path.join(app.getPath('userData'), 'data'));
   files = new Files(store.dir, (ch, d) => win?.webContents.send(ch, d));
+  recordings = new Recordings(store.dir);
   setupMedia();
   setupIpc();
   createWindow();
@@ -399,7 +407,10 @@ app.whenReady().then(() => {
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });
 
-app.on('will-quit', () => linuxAudio.stopSync());
+app.on('will-quit', () => {
+  linuxAudio.stopSync();
+  recordings?.closeAll();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

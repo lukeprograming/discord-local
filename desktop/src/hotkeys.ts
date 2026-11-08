@@ -8,6 +8,7 @@ export const HOTKEY_DEFAULTS: Record<HotkeyName, string> = {
   mute: 'CommandOrControl+Shift+M',
   deafen: 'CommandOrControl+Shift+D',
   ptt: '',
+  clip: 'Alt+F10',
 };
 
 export function hotkeyOf(s: Settings | undefined, name: HotkeyName): string {

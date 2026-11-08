@@ -81,6 +81,15 @@ export function Chat({ conversation }: { conversation: Conversation }) {
     setPickerFor(null);
   }, [conversation.id]);
 
+  // Veio da busca: rola até a mensagem e pisca.
+  useEffect(() => {
+    const j = s.jumpTo;
+    if (!j || j.conversationId !== conversation.id || !byId.has(j.messageId)) return;
+    stickToBottom.current = false;
+    requestAnimationFrame(() => jumpTo(j.messageId));
+    app.clearJump();
+  }, [s.jumpTo, messages.length, conversation.id]);
+
   // Mantém a rolagem no fim quando chegam mensagens, a menos que o usuário tenha subido.
   useLayoutEffect(() => {
     const el = listRef.current;

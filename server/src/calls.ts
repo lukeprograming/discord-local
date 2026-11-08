@@ -90,12 +90,13 @@ export class Calls {
     return [...this.calls.values()].filter((c) => c.participants.has(connectionId)).map((c) => c.conversation_id);
   }
 
-  setState(conversationId: string, connectionId: string, s: Pick<CallParticipant, 'muted' | 'deafened' | 'screen_sharing'>): boolean {
+  setState(conversationId: string, connectionId: string, s: Pick<CallParticipant, 'muted' | 'deafened' | 'screen_sharing' | 'recording'>): boolean {
     const p = this.calls.get(conversationId)?.participants.get(connectionId);
     if (!p) return false;
     p.muted = !!s.muted;
     p.deafened = !!s.deafened;
     p.screen_sharing = !!s.screen_sharing;
+    p.recording = !!s.recording;
     return true;
   }
 

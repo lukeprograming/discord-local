@@ -78,6 +78,8 @@ export type CallParticipant = {
   muted: boolean;
   deafened: boolean;
   screen_sharing: boolean;
+  /** Está gravando a call (todo mundo vê o aviso). */
+  recording?: boolean;
 };
 
 /** Item da fila do bot de YouTube. */
@@ -209,7 +211,7 @@ export type ClientOps = {
   typing: { conversation_id: string };
   'call.join': { conversation_id: string };
   'call.leave': { conversation_id: string };
-  'call.state': { conversation_id: string; muted: boolean; deafened: boolean; screen_sharing: boolean };
+  'call.state': { conversation_id: string; muted: boolean; deafened: boolean; screen_sharing: boolean; recording?: boolean };
   'rtc.signal': { conversation_id: string; to_connection_id: string; signal: RtcSignal };
 };
 

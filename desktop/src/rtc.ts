@@ -39,6 +39,7 @@ type RemoteAudio = {
   el: HTMLAudioElement;
   gain: GainNode | null;
   analyser: AnalyserNode | null;
+  src: MediaStreamAudioSourceNode | null;
 };
 
 type Peer = {
@@ -228,6 +229,66 @@ export class CallSession {
   }
 
   /** `audioApps` (só Linux): transmitir o som só desses apps; vazio/ausente = o PC todo. */
+  // ---- gravação: mistura de todo mundo (antes do volume de cada um) + meu microfone ----
+
+  private recDest: MediaStreamAudioDestinationNode | null = null;
+  private recLocal: AudioNode[] = [];
+
+  /** Áudio da call inteira para gravar/clipar. Chamar stopMixForRecording() no fim. */
+  mixForRecording(): MediaStream {
+    if (!this.recDest) {
+      this.recDest = this.audioCtx.createMediaStreamDestination();
+      for (const peer of this.peers.values()) for (const a of peer.audios.values()) a.src?.connect(this.recDest);
+      this.refreshLocalRecording();
+    }
+    this.recUsers++;
+    return this.recDest.stream;
+  }
+  private recUsers = 0;
+
+  /** Meu microfone (já tratado, mudo quando estou mutado) e o áudio da minha tela. */
+  private refreshLocalRecording(): void {
+    if (!this.recDest) return;
+    for (const n of this.recLocal) n.disconnect();
+    this.recLocal = [];
+    for (const st of [this.send, this.screen]) {
+      if (!st?.getAudioTracks().length) continue;
+      const n = this.audioCtx.createMediaStreamSource(new MediaStream(st.getAudioTracks()));
+      n.connect(this.recDest);
+      this.recLocal.push(n);
+    }
+  }
+
+  stopMixForRecording(): void {
+    if (--this.recUsers > 0 || !this.recDest || this.closed) return;
+    for (const peer of this.peers.values()) for (const a of peer.audios.values()) {
+      try {
+        a.src?.disconnect(this.recDest);
+      } catch {
+        /* já desligado */
+      }
+    }
+    for (const n of this.recLocal) n.disconnect();
+    this.recLocal = [];
+    this.recDest = null;
+    this.recUsers = 0;
+  }
+
+  /** Transmite uma stream pronta (ex.: arquivo de vídeo tocando) como se fosse a tela. */
+  async startCustomScreen(stream: MediaStream, preset: ScreenPreset, hint: 'detail' | 'motion', onStop?: () => void): Promise<void> {
+    const cfg = SCREEN_PRESETS[preset];
+    this.stopScreen();
+    this.screen = stream;
+    this.screenOnStop = onStop ?? null;
+    const video = stream.getVideoTracks()[0];
+    if (video) video.contentHint = hint;
+    for (const [, peer] of this.peers) this.attachScreen(peer, cfg.bitrate, cfg.fps);
+    this.screenCfg = cfg;
+    this.refreshLocalRecording();
+    this.onChange();
+  }
+  private screenOnStop: (() => void) | null = null;
+
   async startScreen(preset: ScreenPreset, withAudio: boolean, hint: 'detail' | 'motion', audioApps?: string[]): Promise<void> {
     const cfg = SCREEN_PRESETS[preset];
     // No Linux o áudio vem de uma fonte virtual do PipeWire (o loopback do Chromium só existe no Windows).
@@ -248,6 +309,7 @@ export class CallSession {
     this.stopScreen();
     this.screen = stream;
     this.screenLinuxAudio = linuxAudio;
+    this.refreshLocalRecording();
     const video = stream.getVideoTracks()[0];
     video.contentHint = hint;
     // Usuário clicou em "parar compartilhamento" na barra do sistema.
@@ -268,6 +330,10 @@ export class CallSession {
     this.screenLinuxAudio = false;
     this.screen = null;
     this.screenCfg = null;
+    const stopped = this.screenOnStop;
+    this.screenOnStop = null;
+    stopped?.();
+    this.refreshLocalRecording();
     // Remove as tracks da tela (vídeo e, no Windows, o áudio do sistema) → renegocia.
     for (const peer of this.peers.values()) {
       removeSenders(peer.pc, peer.screenSenders);
@@ -415,8 +481,10 @@ export class CallSession {
     el.srcObject = stream;
     let gain: GainNode | null = null;
     let analyser: AnalyserNode | null = null;
+    let src: MediaStreamAudioSourceNode | null = null;
     try {
-      const src = this.audioCtx.createMediaStreamSource(stream);
+      src = this.audioCtx.createMediaStreamSource(stream);
+      if (this.recDest) src.connect(this.recDest);
       analyser = this.audioCtx.createAnalyser();
       analyser.fftSize = 512;
       src.connect(analyser);
@@ -432,7 +500,7 @@ export class CallSession {
     }
     if (!gain && this.opts.speakerId) el.setSinkId(this.opts.speakerId).catch(() => {});
     el.play().catch((e) => console.warn('[rtc] play', e));
-    return { stream, el, gain, analyser };
+    return { stream, el, gain, analyser, src };
   }
 
   private applyVolumes(peer: Peer): void {

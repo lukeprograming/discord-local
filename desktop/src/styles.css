@@ -400,3 +400,26 @@ button.danger { background: var(--red); color: white; }
 .sound-del { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; border-radius: 50%; font-size: 10px; background: var(--bg-0); display: none; }
 .sound-btn-wrap:hover .sound-del { display: block; }
 .add-sound { display: flex; flex-direction: column; gap: 6px; background: var(--bg-2); border-radius: 8px; padding: 8px; }
+
+/* ---- 0.6: busca ---- */
+.search-modal { width: min(640px, 94vw); max-width: none; display: flex; flex-direction: column; gap: 8px; max-height: 80vh; }
+.search-modal > input { font-size: 16px; padding: 10px 12px; }
+.search-results { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; min-height: 60px; }
+.search-hit { background: none; text-align: left; padding: 8px 10px; border-radius: 6px; color: var(--text); display: flex; flex-direction: column; gap: 2px; }
+.search-hit.on { background: var(--bg-3); }
+.search-meta { display: flex; gap: 6px; align-items: baseline; font-size: 13px; }
+.search-meta small { margin-left: auto; }
+.search-text { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+.search-text mark { background: rgba(240,178,50,.35); color: inherit; border-radius: 2px; }
+
+/* ---- 0.6: gravação, clipes, vídeo do PC ---- */
+.video-share-source { position: fixed; left: -10000px; top: 0; width: 320px; height: 180px; }
+.video-share-bar { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(30,31,34,.92); opacity: 0; transition: opacity .15s; }
+.screen-tile:hover .video-share-bar { opacity: 1; }
+.rec-badge { background: var(--red); color: white; font-size: 10px; font-weight: 700; padding: 0 5px; border-radius: 4px; margin-left: 4px; }
+.record-panel .rec-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rec-targets { display: flex; flex-wrap: wrap; gap: 6px; }
+.share-source { display: flex; gap: 6px; }
+.share-source button { flex: 1; }
+.share-source button.on { background: var(--accent); color: white; }
+.pick-video { width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

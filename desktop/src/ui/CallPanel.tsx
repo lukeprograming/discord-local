@@ -4,8 +4,11 @@ import { app, useApp } from '../app.ts';
 import { SCREEN_PRESETS, type ScreenPreset } from '../rtc.ts';
 import { Avatar } from './common.tsx';
 import { openMini } from '../mini.ts';
+import { sendFiles } from '../files.ts';
 import { BotPanel, BotPlayer } from './YouTubeBot.tsx';
 import { SoundboardPanel } from './Soundboard.tsx';
+import { canRecord, saveClip, setVideoVolume, startClipBuffer, startRecording, stopClipBuffer, stopRecording, useRecorder, type Target } from '../recorder.ts';
+import { hotkeyOf, prettyAccel } from '../hotkeys.ts';
 
 export function CallPanel({ conversation }: { conversation: Conversation }) {
   const s = useApp((s) => s);
@@ -14,6 +17,8 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
   const [shareOpen, setShareOpen] = useState(false);
   const [botOpen, setBotOpen] = useState(false);
   const [soundsOpen, setSoundsOpen] = useState(false);
+  const [recOpen, setRecOpen] = useState(false);
+  const recState = useRecorder();
   const [focused, setFocused] = useState<string | null>(null); // mostrar só a tela dessa conexão
   const [volumeFor, setVolumeFor] = useState<string | null>(null); // conexão com o popup de volume aberto
   const stage = s.stage;
@@ -104,6 +109,7 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
               onDoubleClick={() => app.setStage(stage === 'normal' ? 'theater' : 'normal')}
             >
               <Video stream={stream!} muted />
+              {p.connection_id === s.connectionId && recState.video && <VideoShareControls el={recState.video.el} name={recState.video.name} />}
               <div className="screen-label">
                 🖥 {app.user(p.user_id)?.display_name}
                 {p.connection_id === s.connectionId && ' (você)'}
@@ -155,6 +161,7 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
                 {p.muted && ' 🔇'}
                 {p.deafened && ' 🙉'}
                 {p.screen_sharing && ' 🖥'}
+                {p.recording && <span className="rec-badge" title="Está gravando a call">⏺ REC</span>}
               </span>
               {!me && r && r.state !== 'connected' && <small className="muted">{r.state === 'failed' ? 'falhou' : 'conectando…'}</small>}
               {volumeFor === p.connection_id && (
@@ -195,6 +202,15 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
             🖥
           </button>
         )}
+        {canRecord() && (
+          <button
+            className={`round ${recState.recording ? 'red' : recState.clip || recOpen ? 'on' : ''}`}
+            title="Gravar / clipes"
+            onClick={() => setRecOpen(!recOpen)}
+          >
+            ⏺
+          </button>
+        )}
         <button className={`round ${soundsOpen ? 'on' : ''}`} title="Soundboard" onClick={() => setSoundsOpen(!soundsOpen)}>
           📢
         </button>
@@ -215,6 +231,18 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
         </button>
       </div>
 
+      {recOpen && (
+        <RecordPanel
+          targets={[
+            { label: 'Só o áudio da call', stream: null },
+            ...screens.map(({ p, stream }) => ({
+              label: `Tela de ${app.user(p.user_id)?.display_name ?? '?'}${p.connection_id === s.connectionId ? ' (você)' : ''}`,
+              stream: stream!,
+            })),
+          ]}
+          onClose={() => setRecOpen(false)}
+        />
+      )}
       {soundsOpen && <SoundboardPanel onClose={() => setSoundsOpen(false)} />}
       {botOpen && <BotPanel media={media} onClose={() => setBotOpen(false)} />}
       {s.callError && <div className="error">{s.callError}</div>}
@@ -280,6 +308,10 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
   const [preset, setPreset] = useState<ScreenPreset>((profile?.settings?.screen_preset as ScreenPreset) ?? '1080p30');
   const [hint, setHint] = useState<'detail' | 'motion'>('detail');
   const [audio, setAudio] = useState(false);
+  const [source, setSource] = useState<'screen' | 'file'>('screen');
+  const [file, setFile] = useState<File | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const canFile = platform !== 'android' && 'captureStream' in HTMLVideoElement.prototype;
   // Linux: escolher de quais apps vai o som (vazio = o PC todo).
   const [onlySome, setOnlySome] = useState(false);
   const [apps, setApps] = useState<{ key: string; name: string; detail: string }[] | null>(null);
@@ -307,7 +339,28 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Transmitir tela</h3>
+        <h3>Transmitir</h3>
+        {canFile && (
+          <div className="share-source">
+            <button className={source === 'screen' ? 'on' : ''} onClick={() => setSource('screen')}>🖥 Tela ou janela</button>
+            <button className={source === 'file' ? 'on' : ''} onClick={() => setSource('file')}>🎞 Vídeo do PC</button>
+          </div>
+        )}
+        {source === 'file' && (
+          <>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="video/*,.mkv"
+              hidden
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+            <button className="pick-video" onClick={() => fileInput.current?.click()}>
+              {file ? `🎞 ${file.name}` : 'Escolher arquivo de vídeo…'}
+            </button>
+            <small className="muted">Vai com o som do vídeo pra todos, sem o resto do PC. Você controla play/pausa/posição na sua tela.</small>
+          </>
+        )}
         <h4>Qualidade</h4>
         {(Object.keys(SCREEN_PRESETS) as ScreenPreset[]).map((k) => (
           <label key={k} className="check">
@@ -315,7 +368,9 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
             {SCREEN_PRESETS[k].label} <small className="muted">~{SCREEN_PRESETS[k].bitrate / 1e6} Mbps por pessoa</small>
           </label>
         ))}
-        <h4>Conteúdo</h4>
+        {source === 'screen' && <h4>Conteúdo</h4>}
+        {source === 'screen' && (
+          <>
         <label className="check">
           <input type="radio" checked={hint === 'detail'} onChange={() => setHint('detail')} />
           Texto / código <small className="muted">prioriza nitidez</small>
@@ -324,7 +379,9 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
           <input type="radio" checked={hint === 'motion'} onChange={() => setHint('motion')} />
           Jogo / vídeo <small className="muted">prioriza fluidez</small>
         </label>
-        {(platform === 'win32' || platform === 'linux') && (
+          </>
+        )}
+        {source === 'screen' && (platform === 'win32' || platform === 'linux') && (
           <label className="check">
             <input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} />
             Transmitir o áudio do PC{' '}
@@ -335,7 +392,7 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
             </small>
           </label>
         )}
-        {audio && canPick && (
+        {source === 'screen' && audio && canPick && (
           <div className="share-audio-apps">
             <label className="check">
               <input type="radio" checked={!onlySome} onChange={() => setOnlySome(false)} />
@@ -372,7 +429,7 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
           <button onClick={onClose}>Cancelar</button>
           <button
             className="primary"
-            disabled={!!audioApps && !audioApps.length}
+            disabled={source === 'file' ? !file : !!audioApps && !audioApps.length}
             title={audioApps && !audioApps.length ? 'Escolha pelo menos um app' : undefined}
             onClick={() => {
               if (audioApps) {
@@ -383,10 +440,11 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
                 }
               }
               onClose();
-              app.startScreen(preset, audio, hint, audioApps);
+              if (source === 'file' && file) app.startVideoShare(file, preset);
+              else app.startScreen(preset, audio, hint, audioApps);
             }}
           >
-            Escolher tela
+            {source === 'file' ? 'Transmitir vídeo' : 'Escolher tela'}
           </button>
         </div>
       </div>
@@ -400,4 +458,141 @@ function Video({ stream, muted }: { stream: MediaStream; muted?: boolean }) {
     if (ref.current && ref.current.srcObject !== stream) ref.current.srcObject = stream;
   }, [stream]);
   return <video ref={ref} autoPlay playsInline muted={muted} />;
+}
+
+function fmtTime(sec: number): string {
+  if (!Number.isFinite(sec)) return '--:--';
+  const t = Math.max(0, Math.floor(sec));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const ss = String(t % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
+/** Controles do vídeo do PC que EU estou transmitindo (os outros só assistem). */
+function VideoShareControls({ el, name }: { el: HTMLVideoElement; name: string }) {
+  const [, redraw] = useState(0);
+  const volume = useApp((s) => s.profile?.settings?.video_share_volume ?? 50);
+  useEffect(() => {
+    const t = window.setInterval(() => redraw((n) => n + 1), 500);
+    const on = () => redraw((n) => n + 1);
+    el.addEventListener('play', on);
+    el.addEventListener('pause', on);
+    return () => {
+      clearInterval(t);
+      el.removeEventListener('play', on);
+      el.removeEventListener('pause', on);
+    };
+  }, [el]);
+  return (
+    <div className="bot-bar video-share-bar" onDoubleClick={(e) => e.stopPropagation()}>
+      <button className="mini" title={el.paused ? 'Tocar' : 'Pausar'} onClick={() => (el.paused ? el.play() : el.pause())}>
+        {el.paused ? '▶' : '❚❚'}
+      </button>
+      <span className="bot-title" title={name}>🎞 {name}</span>
+      <small className="bot-time">
+        {fmtTime(el.currentTime)} / {fmtTime(el.duration)}
+      </small>
+      <input
+        className="bot-seek"
+        type="range"
+        min={0}
+        max={Math.max(1, Math.floor(el.duration || 0))}
+        value={Math.floor(el.currentTime)}
+        onChange={(e) => {
+          el.currentTime = Number(e.target.value);
+          redraw((n) => n + 1);
+        }}
+      />
+      <input
+        className="bot-volume"
+        type="range"
+        min={0}
+        max={100}
+        value={volume}
+        title={`Volume só pra você: ${volume}% (os outros recebem o som cheio)`}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          setVideoVolume(v);
+          app.saveSettings({ video_share_volume: v });
+        }}
+      />
+    </div>
+  );
+}
+
+function RecordPanel({ targets, onClose }: { targets: Target[]; onClose: () => void }) {
+  const r = useRecorder();
+  const clipKey = hotkeyOf(app.state.profile?.settings, 'clip');
+  const [, redraw] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => redraw((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const fail = (e: unknown) => app.toast((e as Error).message);
+  return (
+    <div className="bot-panel record-panel">
+      <div className="bot-panel-head">
+        <strong>⏺ Gravar e clipes</strong>
+        <small className="muted">os outros veem que você está gravando</small>
+        <button className="icon" title="Fechar" onClick={onClose}>✕</button>
+      </div>
+      {r.recording ? (
+        <div className="rec-row">
+          <span className="rec-dot" /> Gravando <strong>{r.recording.label}</strong> — {fmtTime((Date.now() - r.recording.startedAt) / 1000)}
+          <button className="mini" onClick={stopRecording}>⏹ parar e salvar</button>
+        </div>
+      ) : (
+        <div className="rec-targets">
+          {targets.map((t) => (
+            <button key={t.label} className="mini" onClick={() => startRecording(t).catch(fail)}>
+              ⏺ Gravar {t.label.charAt(0).toLowerCase() + t.label.slice(1)}
+            </button>
+          ))}
+        </div>
+      )}
+      {r.lastRecording && !r.recording && (
+        <small className="muted">
+          Última gravação salva. <button className="link" onClick={() => window.native.recShow?.(r.lastRecording!)}>mostrar na pasta</button>
+        </small>
+      )}
+      <hr />
+      <div className="rec-row">
+        <strong>🎬 Clipes</strong>
+        <small className="muted">
+          guarda sempre os últimos 30–60 s; {clipKey ? `${prettyAccel(clipKey)} salva` : 'defina a tecla nas Configurações'}
+        </small>
+      </div>
+      {r.clip ? (
+        <div className="rec-row">
+          Guardando <strong>{r.clip.label}</strong>
+          <button className="mini" onClick={() => saveClip().catch(fail)}>💾 salvar clipe agora</button>
+          <button className="mini" onClick={stopClipBuffer}>desligar</button>
+        </div>
+      ) : (
+        <div className="rec-targets">
+          {targets.map((t) => (
+            <button key={t.label} className="mini" onClick={() => startClipBuffer(t)}>
+              🎬 Guardar clipes: {t.label.charAt(0).toLowerCase() + t.label.slice(1)}
+            </button>
+          ))}
+        </div>
+      )}
+      {r.lastClip && (
+        <div className="rec-row">
+          <small className="muted">Último: {r.lastClip.name}</small>
+          <button
+            className="mini"
+            onClick={() => {
+              const conv = app.state.call?.conversationId;
+              if (conv) sendFiles(conv, [new File([r.lastClip!.blob], r.lastClip!.name, { type: r.lastClip!.blob.type })]);
+            }}
+          >
+            📤 mandar no chat
+          </button>
+          <button className="mini" onClick={() => window.native.recShow?.(r.lastClip!.path)}>mostrar na pasta</button>
+        </div>
+      )}
+    </div>
+  );
 }

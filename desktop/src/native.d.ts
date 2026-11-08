@@ -22,7 +22,7 @@ export type UpdateStatus = {
   checked_at?: number;
 };
 
-export type HotkeyName = 'mute' | 'deafen' | 'ptt';
+export type HotkeyName = 'mute' | 'deafen' | 'ptt' | 'clip';
 
 export type HostStatus = { running: boolean; url?: string; ip?: string; port?: number };
 
@@ -51,6 +51,9 @@ export type Settings = {
   hotkey_mute?: string;
   hotkey_deafen?: string;
   hotkey_ptt?: string;
+  hotkey_clip?: string;
+  /** Volume, só pra mim, do vídeo que estou transmitindo de um arquivo (0–100). */
+  video_share_volume?: number;
   /** 'ptt' = microfone só abre segurando a tecla. */
   voice_mode?: 'open' | 'ptt';
   /** Conversas sem notificação (menção ainda avisa). */
@@ -77,6 +80,11 @@ declare global {
       openDataDir(): Promise<void>;
       /** Prévia de links: busca fora do renderer (CORS). Só https. */
       fetchUrl?(url: string, kind: 'page' | 'image'): Promise<{ type: string; finalUrl: string; text?: string; dataUrl?: string }>;
+      // ---- gravações e clipes (só desktop) ----
+      recStart?(kind: 'gravacao' | 'clipe', ext: string): Promise<{ id: string; path: string }>;
+      recWrite?(id: string, bytes: Uint8Array): Promise<void>;
+      recFinish?(id: string): Promise<string | null>;
+      recShow?(path: string): Promise<void>;
       /** 'kde' = global com apertar e soltar (push-to-talk global); 'basic' = só apertar. */
       hotkeysKind?(): Promise<'kde' | 'basic'>;
       /** Devolve os que não deu pra registrar (tecla já usada, inválida…). */
