@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('native', {
   loadProfile: () => ipcRenderer.invoke('store:loadProfile'),
@@ -8,6 +8,26 @@ contextBridge.exposeInMainWorld('native', {
   loadOutbox: () => ipcRenderer.invoke('store:loadOutbox'),
   saveOutbox: (list) => ipcRenderer.invoke('store:saveOutbox', list),
   openDataDir: () => ipcRenderer.invoke('store:openDataDir'),
+  // ---- arquivos do chat ----
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || null;
+    } catch {
+      return null;
+    }
+  },
+  fileLocal: (convId, att) => ipcRenderer.invoke('file:local', convId, att),
+  fileDownload: (serverUrl, token, convId, att) => ipcRenderer.invoke('file:download', serverUrl, token, convId, att),
+  fileKeepSent: (convId, att, source) => ipcRenderer.invoke('file:keepSent', convId, att, source),
+  fileRead: (p) => ipcRenderer.invoke('file:read', p),
+  fileOpen: (p) => ipcRenderer.invoke('file:open', p),
+  fileShow: (p) => ipcRenderer.invoke('file:show', p),
+  fileSaveAs: (p) => ipcRenderer.invoke('file:saveAs', p),
+  onFileProgress: (cb) => {
+    const listener = (_e, p) => cb(p);
+    ipcRenderer.on('file:progress', listener);
+    return () => ipcRenderer.removeListener('file:progress', listener);
+  },
   info: () => ipcRenderer.invoke('app:info'),
   flash: () => ipcRenderer.invoke('app:flash'),
   focusMain: () => ipcRenderer.invoke('app:focus'),

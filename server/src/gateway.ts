@@ -6,10 +6,12 @@ import type {
   ServerOps,
   UserPublic,
   VoiceAttachment,
+  Attachment,
+  FileAttachment,
 } from '../../shared/protocol.ts';
 import { MAX_MESSAGE_LENGTH, MAX_VOICE_BASE64, MAX_VOICE_MS, VOICE_PEAKS } from '../../shared/protocol.ts';
 import type { Db } from './db.ts';
-import { Calls } from './calls.ts';
+import { Calls, MediaError } from './calls.ts';
 import { hashToken } from './auth.ts';
 import { randomCode, ulid, ULID_RE } from './ids.ts';
 
@@ -194,6 +196,14 @@ export class Gateway {
     else this.sendToMembers(conversationId, 'call.update', { call: this.calls.info(conversationId)! });
   }
 
+  private attachmentOf(a: unknown, userId: string, conversationId: string, resend = false): Attachment {
+    if ((a as { kind?: string } | null)?.kind !== 'file') return voiceAttachment(a);
+    const f = this.db.file(String((a as FileAttachment).id));
+    if (!f || f.uploader_id !== userId || f.conversation_id !== conversationId) throw new ClientError('arquivo não encontrado');
+    if (f.attached && !resend) throw new ClientError('arquivo já enviado');
+    return { kind: 'file', id: f.id, name: f.name, size: f.size, mime: f.mime };
+  }
+
   private requireMember(conversationId: unknown, userId: string): string {
     if (typeof conversationId !== 'string' || !this.db.isMember(conversationId, userId)) {
       throw new ClientError('conversa não encontrada');
@@ -269,10 +279,11 @@ export class Gateway {
       if (typeof d.id !== 'string' || !ULID_RE.test(d.id)) throw new ClientError('id de mensagem inválido');
       const content = typeof d.content === 'string' ? d.content.trim() : '';
       if (!content || content.length > MAX_MESSAGE_LENGTH) throw new ClientError('mensagem vazia ou longa demais');
-      const attachment = d.attachment === undefined ? undefined : voiceAttachment(d.attachment);
 
       // Reenvio (ack anterior se perdeu): devolve o carimbo original sem duplicar.
       const prev = this.db.existingMessage(d.id);
+      // No reenvio o arquivo já está ligado a esta mensagem.
+      const attachment = d.attachment === undefined ? undefined : this.attachmentOf(d.attachment, conn.user.id, conversationId, !!prev);
       if (prev) {
         if (prev.sender_id !== conn.user.id) throw new ClientError('id de mensagem em uso');
         return { message: { id: d.id, conversation_id: prev.conversation_id, sender_id: prev.sender_id, content, created_at: prev.created_at, ...(attachment && { attachment }) } };
@@ -280,7 +291,10 @@ export class Gateway {
 
       const message: Message = { id: d.id, conversation_id: conversationId, sender_id: conn.user.id, content, created_at: Date.now(), ...(attachment && { attachment }) };
       const recipients = this.db.memberIds(conversationId).filter((u) => u !== conn.user.id);
-      this.db.tx(() => this.db.storeMessage(message, recipients));
+      this.db.tx(() => {
+        this.db.storeMessage(message, recipients);
+        if (attachment?.kind === 'file') this.db.attachFile(attachment.id, recipients);
+      });
       for (const uid of recipients) this.sendToUser(uid, 'message.created', { message });
       return { message };
     },
@@ -325,6 +339,19 @@ export class Gateway {
       const conversationId = this.requireMember(d.conversation_id, conn.user.id);
       if (!this.calls.setState(conversationId, conn.id, d)) throw new ClientError('você não está nessa call');
       this.sendToMembers(conversationId, 'call.update', { call: this.calls.info(conversationId)! });
+    },
+
+    'call.media': (conn, d) => {
+      const conversationId = this.requireMember(d.conversation_id, conn.user.id);
+      if (!this.calls.inCall(conversationId, conn.id)) throw new ClientError('entre na call para controlar o bot');
+      let changed: boolean;
+      try {
+        changed = this.calls.media(conversationId, conn.user.id, d.action);
+      } catch (e) {
+        if (e instanceof MediaError) throw new ClientError(e.message);
+        throw e;
+      }
+      if (changed) this.sendToMembers(conversationId, 'call.update', { call: this.calls.info(conversationId)! });
     },
 
     'rtc.signal': (conn, d) => {

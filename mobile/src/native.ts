@@ -10,7 +10,7 @@ import { registerPlugin } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import type { Message } from '../../shared/protocol.ts';
+import type { FileAttachment, Message } from '../../shared/protocol.ts';
 import type { HostStatus, Profile, UpdateStatus } from '../../desktop/src/native.d.ts';
 import { app } from '../../desktop/src/app.ts';
 
@@ -136,6 +136,54 @@ CapApp.addListener('backButton', () => {
   else CapApp.minimizeApp();
 });
 
+// ---- arquivos do chat: só imagens ficam no app (prévia); o resto vai pelo navegador ----
+
+function filePath(convId: string, att: FileAttachment): string {
+  if (!ID_RE.test(convId) || !ID_RE.test(att.id)) throw new Error('id inválido');
+  return `arquivos/${convId}/${att.id}`;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+async function writeBytes(path: string, bytes: Uint8Array): Promise<string> {
+  await Filesystem.writeFile({ path, directory: dir, data: toBase64(bytes), recursive: true });
+  return path;
+}
+
+const fileApi = {
+  fileLocal: async (convId: string, att: FileAttachment) => {
+    const path = filePath(convId, att);
+    try {
+      await Filesystem.stat({ path, directory: dir });
+      return path;
+    } catch {
+      return null;
+    }
+  },
+  fileDownload: async (serverUrl: string, token: string, convId: string, att: FileAttachment) => {
+    const res = await fetch(`${serverUrl.replace(/\/$/, '')}/files/${att.id}`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `HTTP ${res.status}`);
+    return writeBytes(filePath(convId, att), new Uint8Array(await res.arrayBuffer()));
+  },
+  fileKeepSent: async (convId: string, att: FileAttachment, source: string | Uint8Array) => {
+    if (typeof source === 'string' || !att.mime.startsWith('image/')) throw new Error('só imagens ficam no app');
+    return writeBytes(filePath(convId, att), source);
+  },
+  fileRead: async (path: string) => {
+    if (!/^arquivos\/[0-9A-Z]{26}\/[0-9A-Z]{26}$/.test(path)) throw new Error('caminho inválido');
+    const { data } = await Filesystem.readFile({ path, directory: dir });
+    const bin = atob(data as string);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  },
+  openUrl: (url: string) => DL.openUrl({ url }),
+};
+
 const noHost: HostStatus = { running: false };
 const unsupported = () => Promise.reject(new Error('Indisponível no celular — use o app do computador.'));
 
@@ -190,6 +238,7 @@ window.native = {
     updateListeners.add(cb);
     return () => updateListeners.delete(cb);
   },
+  ...fileApi,
   callActive: (active) => DL.callActive({ active }).catch(() => {}),
   setSpeaker: (on) => DL.setSpeaker({ on }),
 };

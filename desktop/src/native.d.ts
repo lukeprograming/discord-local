@@ -1,4 +1,4 @@
-import type { Conversation, Friend, Message, UserPublic } from '../../shared/protocol.ts';
+import type { Conversation, FileAttachment, Friend, Message, UserPublic } from '../../shared/protocol.ts';
 
 export type HostConfig = {
   ip: string;
@@ -45,6 +45,8 @@ export type Settings = {
   mic_threshold?: number | null;
   /** Supressão de ruído do microfone. Ausente = padrão (GTCRN). */
   mic_noise?: 'off' | 'native' | 'rnnoise' | 'gtcrn';
+  /** Volume do bot de YouTube neste aparelho (0–100). */
+  yt_volume?: number;
   /** Volume que eu escolhi para cada pessoa: voz e áudio da transmissão de tela. */
   user_volumes?: Record<string, { voice?: number; screen?: number }>;
 };
@@ -61,6 +63,18 @@ declare global {
       loadOutbox(): Promise<Message[]>;
       saveOutbox(list: Message[]): Promise<void>;
       openDataDir(): Promise<void>;
+      // ---- arquivos do chat (caminho local = onde o arquivo está guardado no aparelho) ----
+      pathForFile?(file: File): string | null;
+      fileLocal?(convId: string, att: FileAttachment): Promise<string | null>;
+      fileDownload?(serverUrl: string, token: string, convId: string, att: FileAttachment): Promise<string>;
+      fileKeepSent?(convId: string, att: FileAttachment, source: string | Uint8Array): Promise<string>;
+      fileRead?(path: string): Promise<Uint8Array>;
+      fileOpen?(path: string): Promise<void>;
+      fileShow?(path: string): Promise<void>;
+      fileSaveAs?(path: string): Promise<string | null>;
+      /** Abre no navegador do aparelho (celular: downloads grandes). */
+      openUrl?(url: string): Promise<void>;
+      onFileProgress?(cb: (p: { id: string; done: number; total: number }) => void): () => void;
       info(): Promise<{ platform: string; profile: string; version: string }>;
       flash(): Promise<void>;
       focusMain?(): Promise<void>;

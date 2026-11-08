@@ -6,6 +6,7 @@ const host = require('./host.cjs');
 const embed = require('./embed.cjs');
 const updater = require('./updater.cjs');
 const linuxAudio = require('./linux-audio.cjs');
+const { Files } = require('./files.cjs');
 
 // Releases de onde vêm as atualizações e os instaladores limpos para exportar.
 const GITHUB_REPO = 'lukeprograming/discord-local';
@@ -34,6 +35,7 @@ app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
 
 let win = null;
 let store = null;
+let files = null;
 let pendingPick = null; // callback do setDisplayMediaRequestHandler aguardando o seletor
 let quitting = false; // saída já em andamento (não segurar no before-quit)
 
@@ -143,6 +145,15 @@ function kwinKeepAbove(title) {
 
 function setupMedia() {
   const ses = session.defaultSession;
+  // O player embutido do YouTube recusa tocar sem Referer (erro 153), e páginas
+  // file:// não mandam um. O Android (http://localhost) já manda sozinho.
+  ses.webRequest.onBeforeSendHeaders(
+    { urls: ['https://www.youtube-nocookie.com/*', 'https://www.youtube.com/*'] },
+    (details, cb) => {
+      if (!details.requestHeaders.Referer) details.requestHeaders.Referer = 'http://localhost/';
+      cb({ requestHeaders: details.requestHeaders });
+    },
+  );
   ses.setPermissionRequestHandler((_wc, permission, cb) => {
     cb(['media', 'notifications', 'display-capture', 'speaker-selection'].includes(permission));
   });
@@ -185,6 +196,14 @@ function setupIpc() {
   ipcMain.handle('store:loadOutbox', () => store.loadOutbox());
   ipcMain.handle('store:saveOutbox', (_e, list) => store.saveOutbox(list));
   ipcMain.handle('store:dataDir', () => store.dir);
+  // ---- arquivos do chat ----
+  ipcMain.handle('file:local', (_e, convId, att) => files.local(convId, att));
+  ipcMain.handle('file:download', (_e, serverUrl, token, convId, att) => files.download(serverUrl, token, convId, att));
+  ipcMain.handle('file:keepSent', (_e, convId, att, source) => files.keepSent(convId, att, source));
+  ipcMain.handle('file:read', (_e, p) => files.read(p));
+  ipcMain.handle('file:open', (_e, p) => files.open(p));
+  ipcMain.handle('file:show', (_e, p) => files.show(p));
+  ipcMain.handle('file:saveAs', (_e, p) => files.saveAs(win, p));
   ipcMain.handle('store:openDataDir', () => shell.openPath(store.dir));
   ipcMain.handle('screen:picked', (_e, id) => pendingPick?.(id));
   // Áudio do PC na transmissão (Linux): fonte virtual do PipeWire sem o som do próprio app.
@@ -360,6 +379,7 @@ async function exportConnector(platform, cfg, pickAgain) {
 
 app.whenReady().then(() => {
   store = new LocalStore(path.join(app.getPath('userData'), 'data'));
+  files = new Files(store.dir, (ch, d) => win?.webContents.send(ch, d));
   setupMedia();
   setupIpc();
   createWindow();

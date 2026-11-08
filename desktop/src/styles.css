@@ -269,3 +269,48 @@ button.link.back { display: block; margin: 14px auto 0; }
 
 .share-audio-apps { margin: 2px 0 0 26px; display: flex; flex-direction: column; gap: 2px; }
 .share-audio-apps .app-list { margin-left: 26px; display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; align-items: flex-start; }
+
+/* ---- arquivos ---- */
+.chat { position: relative; }
+.chat.dragging::after { content: ''; position: absolute; inset: 8px; border: 2px dashed var(--accent); border-radius: 12px; pointer-events: none; }
+.drop-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 5; background: var(--accent); color: white; padding: 12px 20px; border-radius: 10px; font-weight: 600; pointer-events: none; }
+.attach-btn { width: 44px; height: 44px; flex-shrink: 0; border-radius: 50%; padding: 0; background: var(--bg-3); font-size: 18px; }
+.file-card { display: inline-flex; flex-direction: column; gap: 6px; background: var(--bg-1); border: 1px solid var(--bg-0); border-radius: 10px; padding: 8px 10px; max-width: min(440px, 100%); white-space: normal; }
+.file-img { max-width: 100%; max-height: 320px; border-radius: 6px; cursor: pointer; object-fit: contain; align-self: flex-start; }
+.file-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.file-icon { font-size: 26px; flex-shrink: 0; }
+.file-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.file-name { font-weight: 600; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.file-progress { height: 4px; background: var(--bg-0); border-radius: 2px; overflow: hidden; margin-top: 4px; min-width: 80px; flex: 1; }
+.file-progress span { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+.uploads { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.upload { display: flex; align-items: center; gap: 10px; background: var(--bg-1); border-radius: 8px; padding: 4px 4px 4px 10px; font-size: 13px; }
+.upload > span { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- bot do YouTube ---- */
+.bot-tile { flex-direction: column; }
+.bot-video { position: relative; flex: 1; min-height: 0; }
+.bot-video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.bot-shield { position: absolute; inset: 0; }
+.bot-tile.audio-only { min-height: 0; max-height: 64px; align-self: start; }
+.bot-tile.audio-only .bot-video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; overflow: hidden; }
+.bot-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg-1); font-size: 13px; flex-shrink: 0; }
+.bot-thumb { width: 64px; height: 36px; object-fit: cover; border-radius: 4px; }
+.bot-title { flex: 0 1 auto; min-width: 60px; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-strong); }
+.bot-time { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.bot-seek { flex: 1; min-width: 60px; }
+.bot-volume { width: 70px; }
+.bot-panel { width: 100%; max-width: 640px; background: var(--bg-1); border-radius: var(--radius); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.bot-panel-head { display: flex; align-items: baseline; gap: 8px; }
+.bot-panel-head .muted { flex: 1; }
+.bot-add { display: flex; gap: 6px; }
+.bot-add input { flex: 1; }
+.bot-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.bot-queue li { display: flex; align-items: center; gap: 8px; padding: 4px; border-radius: 6px; }
+.bot-queue li.now { background: var(--bg-3); }
+.bot-queue img { width: 64px; height: 36px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.bot-queue li > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bot-queue li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 700px) { .bot-volume { display: none; } .bot-title { max-width: 30%; } }
+.yt-play { margin-left: 6px; vertical-align: middle; }

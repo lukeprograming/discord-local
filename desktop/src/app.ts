@@ -7,12 +7,16 @@ import type {
   Presence,
   UserPublic,
   VoiceAttachment,
+  FileAttachment,
+  Attachment,
+  MediaAction,
 } from '../../shared/protocol.ts';
 import { MAX_MESSAGE_LENGTH } from '../../shared/protocol.ts';
 import { GatewayClient, httpPost } from './gateway.ts';
 import { CallSession, type AudioKind, type ScreenPreset } from './rtc.ts';
 import { DEFAULT_NOISE, type MicSettings } from './mic.ts';
 import { ulid } from './ulid.ts';
+import { autoDownload, formatSize } from './files.ts';
 import type { EmbeddedConfig, HostConfig, HostStatus, Profile, Settings, UpdateStatus } from './native.d.ts';
 
 export function micSettings(s: Settings | undefined): MicSettings {
@@ -431,6 +435,7 @@ class App {
     const fresh = await window.native.appendMessages(message.conversation_id, [message]);
     this.queueAck(message.id);
     if (!fresh.length) return;
+    if (message.attachment?.kind === 'file') autoDownload(message.conversation_id, message.attachment);
     this.addToState(message);
     if (message.sender_id !== this.me()?.id && (this.state.selected !== message.conversation_id || !document.hasFocus())) {
       if (this.state.selected !== message.conversation_id) {
@@ -483,10 +488,19 @@ class App {
   }
 
   async sendVoice(conversationId: string, attachment: VoiceAttachment): Promise<void> {
-    const me = this.me();
-    if (!me) return;
     const secs = Math.round(attachment.duration_ms / 1000);
     const content = `🎤 Mensagem de voz (${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')})`;
+    return this.sendAttachment(conversationId, content, attachment);
+  }
+
+  /** Arquivo já enviado ao host (POST /files): vira mensagem. */
+  async sendFile(conversationId: string, attachment: FileAttachment): Promise<void> {
+    return this.sendAttachment(conversationId, `📎 ${attachment.name} (${formatSize(attachment.size)})`, attachment);
+  }
+
+  private async sendAttachment(conversationId: string, content: string, attachment: Attachment): Promise<void> {
+    const me = this.me();
+    if (!me) return;
     const msg: Message = { id: ulid(), conversation_id: conversationId, sender_id: me.id, content, created_at: Date.now(), attachment };
     const outbox = [...this.state.outbox, msg];
     this.set({ outbox });
@@ -706,6 +720,13 @@ class App {
       return;
     }
     this.pushCallState();
+  }
+
+  /** Comando pro bot de YouTube da call em que estou. */
+  async media(action: MediaAction): Promise<void> {
+    const call = this.state.call;
+    if (!call) throw new Error('Entre numa call para usar o bot');
+    await this.requireOnline().request('call.media', { conversation_id: call.conversationId, action });
   }
 
   stopScreen(): void {

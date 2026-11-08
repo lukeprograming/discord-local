@@ -4,12 +4,14 @@ import { app, useApp } from '../app.ts';
 import { SCREEN_PRESETS, type ScreenPreset } from '../rtc.ts';
 import { Avatar } from './common.tsx';
 import { openMini } from '../mini.ts';
+import { BotPanel, BotPlayer } from './YouTubeBot.tsx';
 
 export function CallPanel({ conversation }: { conversation: Conversation }) {
   const s = useApp((s) => s);
   const info = s.calls[conversation.id];
   const session = s.call?.conversationId === conversation.id ? s.call : null;
   const [shareOpen, setShareOpen] = useState(false);
+  const [botOpen, setBotOpen] = useState(false);
   const [focused, setFocused] = useState<string | null>(null); // mostrar só a tela dessa conexão
   const [volumeFor, setVolumeFor] = useState<string | null>(null); // conexão com o popup de volume aberto
   const stage = s.stage;
@@ -78,16 +80,20 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
     }))
     .filter((x) => x.stream);
   const focusedScreen = screens.find((x) => x.p.connection_id === focused) ?? null;
+  const media = info?.media;
+  const bot = !!media?.queue.length && !focusedScreen;
+  const stageOn = screens.length > 0 || bot;
 
   return (
     <>
     <div
       ref={panelRef}
-      className={`call-panel ${screens.length ? 'with-screens' : ''} ${focusedScreen ? 'focused' : ''}`}
-      style={screens.length && stage === 'normal' ? { height } : undefined}
+      className={`call-panel ${stageOn ? 'with-screens' : ''} ${focusedScreen ? 'focused' : ''}`}
+      style={stageOn && stage === 'normal' ? { height } : undefined}
     >
-      {screens.length > 0 && (
+      {stageOn && (
         <div className="screens">
+          {bot && <BotPlayer media={media!} />}
           {(focusedScreen ? [focusedScreen] : screens).map(({ p, stream }) => (
             <div
               key={p.connection_id}
@@ -187,7 +193,10 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
             🖥
           </button>
         )}
-        {screens.length > 0 && (
+        <button className={`round ${botOpen || media?.queue.length ? 'on' : ''}`} title="Bot do YouTube (vídeo/música juntos)" onClick={() => setBotOpen(!botOpen)}>
+          🎵
+        </button>
+        {stageOn && (
           <button
             className={`round ${stage !== 'normal' ? 'on' : ''}`}
             title={stage === 'normal' ? 'Ampliar (esconde o chat)' : stage === 'wide' ? 'Ampliar mais (esconde a lateral)' : 'Voltar ao normal (Esc)'}
@@ -201,10 +210,11 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
         </button>
       </div>
 
+      {botOpen && <BotPanel media={media} onClose={() => setBotOpen(false)} />}
       {s.callError && <div className="error">{s.callError}</div>}
       {shareOpen && <ShareOptions onClose={() => setShareOpen(false)} />}
     </div>
-    {screens.length > 0 && stage === 'normal' && (
+    {stageOn && stage === 'normal' && (
       <div className="stage-resizer" title="Arraste para aumentar ou diminuir" onPointerDown={startResize} />
     )}
     </>

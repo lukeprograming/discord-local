@@ -35,13 +35,24 @@ export type VoiceAttachment = {
   peaks: number[]; // forma de onda resumida (0..1)
 };
 
+/** Arquivo enviado: o conteúdo fica no host (POST /files) até todos baixarem ou expirar. */
+export type FileAttachment = {
+  kind: 'file';
+  id: string; // ULID dado pelo servidor no upload
+  name: string;
+  size: number; // bytes
+  mime: string;
+};
+
+export type Attachment = VoiceAttachment | FileAttachment;
+
 export type Message = {
   id: string; // ULID gerado pelo cliente (idempotência do reenvio)
   conversation_id: string;
   sender_id: string;
   content: string; // nas de voz: texto de reserva para versões antigas e notificações
   created_at: number; // ms epoch, carimbado pelo servidor ao receber
-  attachment?: VoiceAttachment;
+  attachment?: Attachment;
 };
 
 export type CallParticipant = {
@@ -52,10 +63,48 @@ export type CallParticipant = {
   screen_sharing: boolean;
 };
 
+/** Item da fila do bot de YouTube. */
+export type MediaItem = {
+  id: string;
+  video_id: string; // 11 caracteres
+  title: string;
+  added_by: string; // user_id
+};
+
+/**
+ * Estado do bot de YouTube: cada um toca no próprio app e se ajusta a isso.
+ * queue[0] é o que está tocando; o que acaba sai da fila.
+ * Posição atual = position + (playing ? agora - updated_at : 0), no relógio do servidor
+ * (server_time é o "agora" do servidor no envio, para descontar a diferença de relógio).
+ */
+export type MediaState = {
+  queue: MediaItem[];
+  playing: boolean;
+  position: number; // segundos
+  updated_at: number;
+  server_time: number;
+};
+
+export type MediaAction =
+  | { type: 'add'; video_id: string; title: string; start?: number; play_now?: boolean }
+  | { type: 'play' }
+  | { type: 'pause'; position?: number }
+  | { type: 'seek'; position: number }
+  | { type: 'next' }
+  /** Toca esse item da fila agora (o atual sai). */
+  | { type: 'jump'; id: string }
+  | { type: 'remove'; id: string }
+  | { type: 'clear' }
+  /** O vídeo atual acabou (cada cliente avisa; o servidor só avança uma vez). */
+  | { type: 'ended'; item_id: string }
+  /** O título real chegou pelo player (o oEmbed pode ter falhado). */
+  | { type: 'title'; item_id: string; title: string };
+
 export type CallInfo = {
   conversation_id: string;
   started_at: number;
   participants: CallParticipant[];
+  media?: MediaState;
 };
 
 // Espelha RTCIceCandidateInit sem depender dos tipos DOM (o servidor não tem).
@@ -91,7 +140,9 @@ export type ClientOps = {
   'friend.accept': { user_id: string };
   'friend.remove': { user_id: string };
   'group.create': { name: string; member_ids: string[] };
-  'message.send': { id: string; conversation_id: string; content: string; attachment?: VoiceAttachment };
+  'message.send': { id: string; conversation_id: string; content: string; attachment?: Attachment };
+  /** Controle do bot de YouTube da call (todos na call podem mexer). */
+  'call.media': { conversation_id: string; action: MediaAction };
   'mailbox.ack': { ids: string[] };
   typing: { conversation_id: string };
   'call.join': { conversation_id: string };
@@ -135,3 +186,7 @@ export const MAX_VOICE_MS = 3 * 60_000;
 /** Tamanho máximo do áudio em base64 (~3 min de Opus a 24 kbps cabem com folga). */
 export const MAX_VOICE_BASE64 = 1_200_000;
 export const VOICE_PEAKS = 48;
+export const MAX_FILE_BYTES = 2 * 1024 ** 3;
+export const FILE_TTL_MS = 7 * 24 * 3600_000;
+export const MAX_MEDIA_QUEUE = 100;
+export const YT_ID_RE = /^[A-Za-z0-9_-]{11}$/;

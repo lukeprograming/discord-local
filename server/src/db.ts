@@ -69,7 +69,34 @@ CREATE TABLE IF NOT EXISTS mailbox (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, message_id)
 );
+-- Arquivos enviados: o conteúdo fica em <dados>/arquivos/<id> até todos baixarem ou expirar.
+CREATE TABLE IF NOT EXISTS files (
+  id              TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  uploader_id     TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  size            INTEGER NOT NULL,
+  mime            TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  attached        INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS file_pending (
+  file_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  PRIMARY KEY (file_id, user_id)
+);
 `;
+
+export type FileRow = {
+  id: string;
+  conversation_id: string;
+  uploader_id: string;
+  name: string;
+  size: number;
+  mime: string;
+  created_at: number;
+  attached: number;
+};
 
 type UserRow = UserPublic & { password_hash: string; is_admin: number };
 
@@ -334,6 +361,49 @@ export class Db {
         payload: string;
       }[]
     ).map((r) => JSON.parse(r.payload) as Message);
+  }
+
+  // ---- arquivos ----
+
+  createFile(f: Omit<FileRow, 'attached'>): void {
+    this.db
+      .prepare('INSERT INTO files (id, conversation_id, uploader_id, name, size, mime, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(f.id, f.conversation_id, f.uploader_id, f.name, f.size, f.mime, f.created_at);
+  }
+
+  file(id: string): FileRow | undefined {
+    return this.db.prepare('SELECT * FROM files WHERE id = ?').get(id) as FileRow | undefined;
+  }
+
+  /** Arquivo virou mensagem: cada destinatário precisa baixar. */
+  attachFile(id: string, recipients: string[]): void {
+    this.db.prepare('UPDATE files SET attached = 1 WHERE id = ?').run(id);
+    const ins = this.db.prepare('INSERT OR IGNORE INTO file_pending (file_id, user_id) VALUES (?, ?)');
+    for (const u of recipients) ins.run(id, u);
+  }
+
+  /** Marca que esse usuário baixou. Retorna quantos ainda faltam. */
+  fileDownloaded(id: string, userId: string): number {
+    this.db.prepare('DELETE FROM file_pending WHERE file_id = ? AND user_id = ?').run(id, userId);
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM file_pending WHERE file_id = ?').get(id) as { n: number }).n;
+  }
+
+  deleteFile(id: string): void {
+    this.db.prepare('DELETE FROM file_pending WHERE file_id = ?').run(id);
+    this.db.prepare('DELETE FROM files WHERE id = ?').run(id);
+  }
+
+  /** Expirados, e uploads que nunca viraram mensagem. */
+  staleFiles(expiredBefore: number, orphanBefore: number): string[] {
+    return (
+      this.db
+        .prepare('SELECT id FROM files WHERE created_at < ? OR (attached = 0 AND created_at < ?)')
+        .all(expiredBefore, orphanBefore) as { id: string }[]
+    ).map((r) => r.id);
+  }
+
+  allFileIds(): Set<string> {
+    return new Set((this.db.prepare('SELECT id FROM files').all() as { id: string }[]).map((r) => r.id));
   }
 
   ackMailbox(userId: string, ids: string[]): void {

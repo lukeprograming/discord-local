@@ -3,6 +3,9 @@ import type { Conversation, Message } from '../../../shared/protocol.ts';
 import { app, useApp } from '../app.ts';
 import { Avatar, formatTime } from './common.tsx';
 import { VoiceMessage, VoiceRecorder } from './Voice.tsx';
+import { FileCard, UploadList } from './FileCard.tsx';
+import { sendFiles } from '../files.ts';
+import { parseYouTube, queueYouTube } from '../youtube.ts';
 
 const GROUP_WINDOW_MS = 5 * 60_000;
 const URL_RE = /(https?:\/\/[^\s<]+)/g;
@@ -11,6 +14,8 @@ export function Chat({ conversation }: { conversation: Conversation }) {
   const s = useApp((s) => s);
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -51,7 +56,23 @@ export function Chat({ conversation }: { conversation: Conversation }) {
   }
 
   return (
-    <section className="chat">
+    <section
+      className={`chat ${dragging ? 'dragging' : ''}`}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        if (e.dataTransfer.files.length) sendFiles(conversation.id, e.dataTransfer.files);
+      }}
+    >
+      {dragging && <div className="drop-hint">Solte para enviar para {app.conversationTitle(conversation)}</div>}
       <header className="chat-header">
         <button className="icon back-btn" title="Voltar" onClick={() => app.select(null)}>←</button>
         {peer ? <Avatar user={peer} online={s.presences[peer.id] === 'ONLINE'} /> : <span className="avatar group-avatar">#</span>}
@@ -106,7 +127,13 @@ export function Chat({ conversation }: { conversation: Conversation }) {
                     </div>
                   )}
                   <div className="msg-text">
-                    {m.attachment?.kind === 'voice' ? <VoiceMessage attachment={m.attachment} /> : <Linkify text={m.content} />}
+                    {m.attachment?.kind === 'voice' ? (
+                      <VoiceMessage attachment={m.attachment} />
+                    ) : m.attachment?.kind === 'file' ? (
+                      <FileCard conversationId={conversation.id} attachment={m.attachment} />
+                    ) : (
+                      <Linkify text={m.content} />
+                    )}
                     {m.pending && <small className="muted" title="Será enviada quando conectar"> ⏳</small>}
                   </div>
                 </div>
@@ -117,7 +144,29 @@ export function Chat({ conversation }: { conversation: Conversation }) {
       </div>
 
       <div className="composer">
+        <UploadList conversationId={conversation.id} />
         <div className="composer-row">
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) sendFiles(conversation.id, e.target.files);
+            e.target.value = '';
+          }}
+        />
+        {!recording && (
+          <button
+            className="attach-btn"
+            title={s.connection !== 'online' ? 'Precisa estar conectado para enviar arquivo' : 'Enviar arquivo'}
+            disabled={s.connection !== 'online'}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => fileInput.current?.click()}
+          >
+            📎
+          </button>
+        )}
         {!recording && (
         <textarea
           ref={inputRef}
@@ -129,6 +178,13 @@ export function Chat({ conversation }: { conversation: Conversation }) {
             if (e.target.value) app.typing(conversation.id);
           }}
           onKeyDown={onKeyDown}
+          onPaste={(e) => {
+            // Print/imagem copiada: vira arquivo.
+            if (e.clipboardData.files.length && s.connection === 'online') {
+              e.preventDefault();
+              sendFiles(conversation.id, e.clipboardData.files);
+            }
+          }}
         />
         )}
         {mobile && text.trim() ? (
@@ -153,9 +209,20 @@ function Linkify({ text }: { text: string }) {
     <>
       {parts.map((p, i) =>
         i % 2 === 1 ? (
-          <a key={i} href={p} target="_blank" rel="noreferrer">
-            {p}
-          </a>
+          <Fragment key={i}>
+            <a href={p} target="_blank" rel="noreferrer">
+              {p}
+            </a>
+            {app.state.call && parseYouTube(p) && (
+              <button
+                className="mini yt-play"
+                title="Tocar no bot do YouTube da call (todos ouvem juntos)"
+                onClick={() => queueYouTube(p).catch((e) => app.toast((e as Error).message))}
+              >
+                ▶ tocar na call
+              </button>
+            )}
+          </Fragment>
         ) : (
           <Fragment key={i}>{p}</Fragment>
         ),

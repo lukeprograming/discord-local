@@ -1,10 +1,15 @@
-import type { CallInfo, CallParticipant } from '../../shared/protocol.ts';
+import type { CallInfo, CallParticipant, MediaAction, MediaState } from '../../shared/protocol.ts';
+import { MAX_MEDIA_QUEUE, YT_ID_RE } from '../../shared/protocol.ts';
+import { ulid } from './ids.ts';
+
+export class MediaError extends Error {}
 
 type Call = {
   conversation_id: string;
   started_at: number;
   participants: Map<string, CallParticipant>; // chave: connection_id
   ringTimer?: NodeJS.Timeout;
+  media: Omit<MediaState, 'server_time'>;
 };
 
 /** Estado das calls em memória. Não sabe nada de sockets: quem chama faz o broadcast. */
@@ -17,7 +22,10 @@ export class Calls {
 
   info(conversationId: string): CallInfo | undefined {
     const c = this.calls.get(conversationId);
-    return c && { conversation_id: c.conversation_id, started_at: c.started_at, participants: [...c.participants.values()] };
+    if (!c) return undefined;
+    const info: CallInfo = { conversation_id: c.conversation_id, started_at: c.started_at, participants: [...c.participants.values()] };
+    if (c.media.queue.length) info.media = { ...c.media, queue: [...c.media.queue], server_time: Date.now() };
+    return info;
   }
 
   all(): CallInfo[] {
@@ -29,7 +37,12 @@ export class Calls {
     let call = this.calls.get(conversationId);
     const created = !call;
     if (!call) {
-      call = { conversation_id: conversationId, started_at: Date.now(), participants: new Map() };
+      call = {
+        conversation_id: conversationId,
+        started_at: Date.now(),
+        participants: new Map(),
+        media: { queue: [], playing: false, position: 0, updated_at: Date.now() },
+      };
       this.calls.set(conversationId, call);
     }
     // Um usuário só fica na call por um aparelho: o novo substitui o antigo.
@@ -84,6 +97,87 @@ export class Calls {
     p.deafened = !!s.deafened;
     p.screen_sharing = !!s.screen_sharing;
     return true;
+  }
+
+  /** Aplica um comando do bot de YouTube. Retorna se o estado mudou. */
+  media(conversationId: string, userId: string, a: MediaAction): boolean {
+    const call = this.calls.get(conversationId);
+    if (!call) throw new MediaError('call não encontrada');
+    const m = call.media;
+    const now = Date.now();
+    const pos = () => (m.playing ? m.position + (now - m.updated_at) / 1000 : m.position);
+    const set = (patch: Partial<typeof m>) => Object.assign(m, patch, { updated_at: now });
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, v) : 0);
+    const current = m.queue[0];
+
+    switch (a?.type) {
+      case 'add': {
+        if (typeof a.video_id !== 'string' || !YT_ID_RE.test(a.video_id)) throw new MediaError('link do YouTube inválido');
+        if (m.queue.length >= MAX_MEDIA_QUEUE) throw new MediaError('fila cheia');
+        const title = (typeof a.title === 'string' ? a.title.trim() : '').slice(0, 200) || 'Vídeo do YouTube';
+        const item = { id: ulid(), video_id: a.video_id, title, added_by: userId };
+        if (!current || a.play_now) {
+          if (a.play_now && current) m.queue.shift();
+          m.queue.unshift(item);
+          set({ playing: true, position: num(a.start) });
+        } else {
+          m.queue.push(item);
+        }
+        return true;
+      }
+      case 'play':
+        if (!current || m.playing) return false;
+        set({ playing: true, position: pos() });
+        return true;
+      case 'pause':
+        if (!current || !m.playing) return false;
+        set({ playing: false, position: a.position !== undefined ? num(a.position) : pos() });
+        return true;
+      case 'seek':
+        if (!current) return false;
+        set({ position: num(a.position) });
+        return true;
+      case 'next':
+        if (!current) return false;
+        m.queue.shift();
+        set({ playing: m.queue.length > 0, position: 0 });
+        return true;
+      case 'ended':
+        // Só o primeiro aviso conta; os outros clientes mandam o mesmo item_id.
+        if (!current || current.id !== a.item_id) return false;
+        m.queue.shift();
+        set({ playing: m.queue.length > 0, position: 0 });
+        return true;
+      case 'jump': {
+        const i = m.queue.findIndex((x) => x.id === a.id);
+        if (i <= 0) return false;
+        const [item] = m.queue.splice(i, 1);
+        m.queue[0] = item;
+        set({ playing: true, position: 0 });
+        return true;
+      }
+      case 'remove': {
+        const i = m.queue.findIndex((x) => x.id === a.id);
+        if (i < 0) return false;
+        m.queue.splice(i, 1);
+        if (i === 0) set({ playing: m.queue.length > 0, position: 0 });
+        return true;
+      }
+      case 'clear':
+        if (!m.queue.length) return false;
+        m.queue = [];
+        set({ playing: false, position: 0 });
+        return true;
+      case 'title': {
+        const item = m.queue.find((x) => x.id === a.item_id);
+        const title = typeof a.title === 'string' ? a.title.trim().slice(0, 200) : '';
+        if (!item || !title || item.title === title) return false;
+        item.title = title;
+        return true;
+      }
+      default:
+        throw new MediaError('comando desconhecido');
+    }
   }
 
   inCall(conversationId: string, connectionId: string): boolean {
