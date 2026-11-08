@@ -5,7 +5,7 @@ import { Avatar, formatTime } from './common.tsx';
 import { VoiceMessage, VoiceRecorder } from './Voice.tsx';
 import { FileCard, UploadList } from './FileCard.tsx';
 import { sendFiles } from '../files.ts';
-import { parseYouTube, queueYouTube } from '../youtube.ts';
+import { parseYouTube, queuePlaylist, queueYouTube } from '../youtube.ts';
 
 const GROUP_WINDOW_MS = 5 * 60_000;
 const URL_RE = /(https?:\/\/[^\s<]+)/g;
@@ -213,13 +213,27 @@ function Linkify({ text }: { text: string }) {
             <a href={p} target="_blank" rel="noreferrer">
               {p}
             </a>
-            {app.state.call && parseYouTube(p) && (
+            {app.state.call && parseYouTube(p)?.id && (
               <button
                 className="mini yt-play"
                 title="Tocar no bot do YouTube da call (todos ouvem juntos)"
                 onClick={() => queueYouTube(p).catch((e) => app.toast((e as Error).message))}
               >
                 ▶ tocar na call
+              </button>
+            )}
+            {app.state.call && parseYouTube(p)?.list && (
+              <button
+                className="mini yt-play"
+                title="Põe a playlist inteira na fila do bot da call"
+                onClick={() => {
+                  app.toast('Carregando a playlist…');
+                  queuePlaylist(p)
+                    .then((n) => app.toast(`Playlist: ${n} vídeos na fila`))
+                    .catch((e) => app.toast((e as Error).message));
+                }}
+              >
+                ▶ playlist na call
               </button>
             )}
           </Fragment>

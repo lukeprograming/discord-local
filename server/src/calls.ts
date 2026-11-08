@@ -125,6 +125,35 @@ export class Calls {
         }
         return true;
       }
+      case 'add_many': {
+        if (!Array.isArray(a.items) || !a.items.length) throw new MediaError('playlist vazia');
+        const items = a.items
+          .filter((x) => x && typeof x.video_id === 'string' && YT_ID_RE.test(x.video_id))
+          .map((x) => ({
+            id: ulid(),
+            video_id: x.video_id,
+            title: (typeof x.title === 'string' ? x.title.trim() : '').slice(0, 200) || 'Vídeo do YouTube',
+            added_by: userId,
+          }));
+        if (!items.length) throw new MediaError('playlist sem vídeos válidos');
+        if (a.play_now) m.queue = [];
+        const room = MAX_MEDIA_QUEUE - m.queue.length;
+        if (room <= 0) throw new MediaError('fila cheia');
+        const wasEmpty = !m.queue.length;
+        m.queue.push(...items.slice(0, room));
+        if (wasEmpty) set({ playing: true, position: 0 });
+        return true;
+      }
+      case 'shuffle': {
+        const rest = m.queue.slice(1);
+        if (rest.length < 2) return false;
+        for (let i = rest.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [rest[i], rest[j]] = [rest[j], rest[i]];
+        }
+        m.queue = [m.queue[0], ...rest];
+        return true;
+      }
       case 'play':
         if (!current || m.playing) return false;
         set({ playing: true, position: pos() });

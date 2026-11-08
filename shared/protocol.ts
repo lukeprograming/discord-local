@@ -87,6 +87,10 @@ export type MediaState = {
 
 export type MediaAction =
   | { type: 'add'; video_id: string; title: string; start?: number; play_now?: boolean }
+  /** Playlist: vários de uma vez (play_now troca a fila atual pela playlist). */
+  | { type: 'add_many'; items: { video_id: string; title: string }[]; play_now?: boolean }
+  /** Embaralha o que vem depois do vídeo atual. */
+  | { type: 'shuffle' }
   | { type: 'play' }
   | { type: 'pause'; position?: number }
   | { type: 'seek'; position: number }
@@ -188,5 +192,5 @@ export const MAX_VOICE_BASE64 = 1_200_000;
 export const VOICE_PEAKS = 48;
 export const MAX_FILE_BYTES = 2 * 1024 ** 3;
 export const FILE_TTL_MS = 7 * 24 * 3600_000;
-export const MAX_MEDIA_QUEUE = 100;
+export const MAX_MEDIA_QUEUE = 300;
 export const YT_ID_RE = /^[A-Za-z0-9_-]{11}$/;

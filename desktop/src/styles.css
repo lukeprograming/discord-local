@@ -314,3 +314,6 @@ button.link.back { display: block; margin: 14px auto 0; }
 .bot-queue li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 700px) { .bot-volume { display: none; } .bot-title { max-width: 30%; } }
 .yt-play { margin-left: 6px; vertical-align: middle; }
+.bot-playlist { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.bot-queue-actions { display: flex; align-items: center; gap: 8px; }
+.bot-queue-actions .muted { flex: 1; }

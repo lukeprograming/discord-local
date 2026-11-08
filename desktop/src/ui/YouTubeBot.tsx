@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MediaState } from '../../../shared/protocol.ts';
 import { app, useApp } from '../app.ts';
-import { queueYouTube, thumb } from '../youtube.ts';
+import { parseYouTube, queuePlaylist, queueYouTube, thumb } from '../youtube.ts';
 
 const FALLBACK_TITLE = 'Vídeo do YouTube';
 const fail = (e: unknown) => app.toast((e as Error).message);
@@ -242,18 +242,26 @@ export function BotPlayer({ media }: { media: MediaState }) {
 export function BotPanel({ media, onClose }: { media: MediaState | undefined; onClose: () => void }) {
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const queue = media?.queue ?? [];
+  const ref = parseYouTube(link);
 
-  async function add(playNow: boolean) {
+  async function add(playNow: boolean, whole = false) {
     if (!link.trim()) return;
     setBusy(true);
     try {
-      await queueYouTube(link, playNow);
+      if (whole || (ref?.list && !ref.id)) {
+        const n = await queuePlaylist(link, playNow, setProgress);
+        app.toast(`Playlist: ${n} vídeos na fila`);
+      } else {
+        await queueYouTube(link, playNow);
+      }
       setLink('');
     } catch (e) {
       fail(e);
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -281,11 +289,23 @@ export function BotPanel({ media, onClose }: { media: MediaState | undefined; on
           {queue.length ? 'Pôr na fila' : 'Tocar'}
         </button>
         {queue.length > 0 && (
-          <button type="button" disabled={busy || !link.trim()} onClick={() => add(true)}>
+          <button type="button" disabled={busy || !link.trim()} onClick={() => add(true)} title={ref?.list && !ref.id ? 'Troca a fila pela playlist' : undefined}>
             Tocar agora
           </button>
         )}
       </form>
+      {ref?.list && ref.id && (
+        <div className="bot-playlist">
+          <small className="muted">Esse link é de um vídeo dentro de uma playlist.</small>
+          <button type="button" className="mini" disabled={busy} onClick={() => add(false, true)}>
+            ➕ playlist inteira na fila
+          </button>
+          <button type="button" className="mini" disabled={busy} onClick={() => add(true, true)} title="Troca a fila atual pela playlist">
+            ▶ tocar a playlist agora
+          </button>
+        </div>
+      )}
+      {progress && <small className="muted">{progress}</small>}
       {queue.length > 0 && (
         <>
           <ol className="bot-queue">
@@ -309,9 +329,17 @@ export function BotPanel({ media, onClose }: { media: MediaState | undefined; on
               </li>
             ))}
           </ol>
-          <button className="link" onClick={() => app.media({ type: 'clear' }).catch(fail)}>
-            Parar e limpar a fila
-          </button>
+          <div className="bot-queue-actions">
+            <small className="muted">{queue.length} na fila</small>
+            {queue.length > 2 && (
+              <button className="link" onClick={() => app.media({ type: 'shuffle' }).catch(fail)}>
+                🔀 embaralhar
+              </button>
+            )}
+            <button className="link" onClick={() => app.media({ type: 'clear' }).catch(fail)}>
+              Parar e limpar a fila
+            </button>
+          </div>
         </>
       )}
     </div>
