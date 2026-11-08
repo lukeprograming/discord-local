@@ -24,15 +24,23 @@ import { checkServer, GatewayClient, httpPost } from './gateway.ts';
 import { CallSession, type AudioKind, type ScreenPreset } from './rtc.ts';
 import { DEFAULT_NOISE, type MicSettings } from './mic.ts';
 import { ulid } from './ulid.ts';
-import { autoDownload, formatSize } from './files.ts';
+import { autoDownload, formatSize, initFiles } from './files.ts';
 import { accelFromEvent, hotkeyOf, mainKey } from './hotkeys.ts';
 import { playSound } from './sounds.ts';
 import { isRecording, saveClip, startVideoFile, stopAllRecording } from './recorder.ts';
 import { scheduleAllReminders, scheduleReminder } from './reminders.ts';
 import type { EmbeddedConfig, HostConfig, HostStatus, Profile, Settings, UpdateStatus } from './native.d.ts';
 
+/** Celular costuma ficar longe da boca: nivelador ligado por padrão lá. */
+const LEVEL_DEFAULT = /Android/i.test(navigator.userAgent);
+
 export function micSettings(s: Settings | undefined): MicSettings {
-  return { volume: s?.mic_volume ?? 1, threshold: s?.mic_threshold ?? null, noise: s?.mic_noise ?? DEFAULT_NOISE };
+  return {
+    volume: s?.mic_volume ?? 1,
+    threshold: s?.mic_threshold ?? null,
+    noise: s?.mic_noise ?? DEFAULT_NOISE,
+    level: s?.mic_level ?? LEVEL_DEFAULT,
+  };
 }
 
 /** Erros vindos do processo principal chegam com prefixo do Electron. */
@@ -331,6 +339,7 @@ class App {
   // ---- boot / login ----
 
   async boot(): Promise<void> {
+    initFiles();
     const [stored, outbox, info, embedded, host, update] = await Promise.all([
       window.native.loadProfile(),
       window.native.loadOutbox(),
@@ -1022,7 +1031,7 @@ class App {
   private volumeSaveTimer = 0;
 
   /** Volume/sensibilidade/supressão de ruído do meu microfone: vale na hora, inclusive dentro da call. */
-  async saveMicSettings(patch: Pick<Settings, 'mic_volume' | 'mic_threshold' | 'mic_noise'>): Promise<void> {
+  async saveMicSettings(patch: Pick<Settings, 'mic_volume' | 'mic_threshold' | 'mic_noise' | 'mic_level'>): Promise<void> {
     await this.saveSettings(patch);
     this.state.call?.setMicSettings(micSettings(this.state.profile?.settings));
   }

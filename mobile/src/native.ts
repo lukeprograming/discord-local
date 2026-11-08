@@ -12,7 +12,9 @@ import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import type { FileAttachment, Message } from '../../shared/protocol.ts';
 import type { HostStatus, Profile, UpdateStatus } from '../../desktop/src/native.d.ts';
-import { app } from '../../desktop/src/app.ts';
+// Sem importar o app aqui: este módulo precisa criar o window.native ANTES de qualquer módulo
+// do app carregar (alguns usam window.native ao carregar). O app é buscado só quando precisa.
+const getApp = () => import('../../desktop/src/app.ts').then((m) => m.app);
 
 /** Plugin do próprio app (android/app/src/main/java/local/discord/app/DLNativePlugin.java). */
 const DL = registerPlugin<{
@@ -131,7 +133,8 @@ async function checkUpdate(): Promise<UpdateStatus> {
 
 // ---- voltar do Android: sai da conversa; na lista, minimiza (não fecha — a call continua) ----
 
-CapApp.addListener('backButton', () => {
+CapApp.addListener('backButton', async () => {
+  const app = await getApp();
   if (app.state.selected) app.select(null);
   else CapApp.minimizeApp();
 });

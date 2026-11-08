@@ -37,13 +37,19 @@ const subscribe = (l: () => void) => {
   return () => listeners.delete(l);
 };
 
-window.native.onFileProgress?.(({ id, done, total }) => {
-  const st = states.get(id);
-  if (st?.status === 'downloading') {
-    states.set(id, { status: 'downloading', done, total });
-    bump();
-  }
-});
+/** Chamado no boot do app (com o window.native já criado — no celular ele nasce depois dos módulos). */
+let progressListening = false;
+export function initFiles(): void {
+  if (progressListening) return;
+  progressListening = true;
+  window.native.onFileProgress?.(({ id, done, total }) => {
+    const st = states.get(id);
+    if (st?.status === 'downloading') {
+      states.set(id, { status: 'downloading', done, total });
+      bump();
+    }
+  });
+}
 
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

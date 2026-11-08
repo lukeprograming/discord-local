@@ -2,7 +2,10 @@
  * Tratamento do microfone antes de enviar: supressão de ruído, volume (ganho)
  * e sensibilidade (noise gate — abaixo do limite os outros recebem silêncio).
  *
- *   mic → supressão por IA (opcional) → ganho → gate (AudioWorklet) → stream enviada
+ *   mic → [nivelador: compressor + ganho] → supressão por IA (opcional) → ganho → gate → stream enviada
+ *
+ * O nivelador (opcional) sobe a voz baixa de quem fala longe do microfone ANTES da IA,
+ * senão a IA confunde voz fraca com ruído e corta.
  *
  * A stream de saída é sempre a mesma: trocar a supressão no meio da call não
  * precisa renegociar nada com os outros.
@@ -34,7 +37,7 @@ function loadWorklet(ctx: AudioContext): Promise<void> {
   return p;
 }
 
-export type MicSettings = { volume: number; threshold: number | null; noise: NoiseMode };
+export type MicSettings = { volume: number; threshold: number | null; noise: NoiseMode; level: boolean };
 
 /** Constraints do getUserMedia. A supressão nativa só fica ligada no modo "native": somada à IA ela come a voz. */
 export function micConstraints(micId: string | undefined, noise: NoiseMode): MediaTrackConstraints {
@@ -64,6 +67,9 @@ export class MicProcessor {
   private src: MediaStreamAudioSourceNode;
   private ai: AiNode | null = null;
   private gain: GainNode;
+  private comp: DynamicsCompressorNode;
+  private makeup: GainNode;
+  private levelOn: boolean;
   private gate: AudioWorkletNode | null;
   private last: AudioNode;
   private threshold: number | null;
@@ -79,9 +85,20 @@ export class MicProcessor {
     this.gain = ctx.createGain();
     this.gain.gain.value = s.volume;
     this.threshold = s.threshold;
+    // Nivelador: comprime forte e devolve +10 dB — voz baixa sobe, grito não estoura.
+    this.comp = ctx.createDynamicsCompressor();
+    this.comp.threshold.value = -45;
+    this.comp.knee.value = 20;
+    this.comp.ratio.value = 8;
+    this.comp.attack.value = 0.005;
+    this.comp.release.value = 0.3;
+    this.makeup = ctx.createGain();
+    this.makeup.gain.value = 3.2;
+    this.comp.connect(this.makeup);
+    this.levelOn = s.level;
     const dest = ctx.createMediaStreamDestination();
     dest.channelCount = 1;
-    this.src.connect(this.gain);
+    this.wire();
     this.gate = gate;
     if (gate) {
       this.gain.connect(gate).connect(dest);
@@ -113,8 +130,23 @@ export class MicProcessor {
     return proc;
   }
 
+  /** Liga as peças na ordem: mic → (nivelador) → (IA) → ganho. */
+  private wire(): void {
+    this.src.disconnect();
+    this.makeup.disconnect();
+    this.ai?.disconnect();
+    if (this.levelOn) this.src.connect(this.comp);
+    const head: AudioNode = this.levelOn ? this.makeup : this.src;
+    if (this.ai) head.connect(this.ai).connect(this.gain);
+    else head.connect(this.gain);
+  }
+
   set(s: MicSettings): void {
     this.gain.gain.value = s.volume;
+    if (s.level !== this.levelOn) {
+      this.levelOn = s.level;
+      this.wire();
+    }
     this.threshold = s.threshold;
     this.gate?.port.postMessage({ threshold: s.threshold });
     this.setNoise(s.noise);
@@ -155,14 +187,12 @@ export class MicProcessor {
       });
     }
 
-    this.src.disconnect();
     if (this.ai) {
       this.ai.disconnect();
       this.ai.destroy();
     }
     this.ai = node;
-    if (node) this.src.connect(node).connect(this.gain);
-    else this.src.connect(this.gain);
+    this.wire();
     this.activeNoise = active;
     this.onNoiseChange(active, error);
   }

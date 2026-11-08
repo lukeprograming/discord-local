@@ -162,11 +162,15 @@ function MicSection() {
         <input
           type="range"
           min={0}
-          max={200}
+          max={400}
           step={5}
           value={Math.round(mic.volume * 100)}
           onChange={(e) => app.saveMicSettings({ mic_volume: Number(e.target.value) / 100 })}
         />
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={mic.level} onChange={(e) => app.saveMicSettings({ mic_level: e.target.checked })} />
+        Nivelar voz <small className="muted">(sobe a voz de quem fala longe do microfone; recomendado no celular)</small>
       </label>
       <label>
         Supressão de ruído

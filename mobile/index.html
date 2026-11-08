@@ -17,18 +17,32 @@
         function warn(extra) {
           var r = document.getElementById('root');
           if (!r || r.childNodes.length) return;
+          var old = v && v < 87;
           r.innerHTML =
             '<div style="font:16px sans-serif;color:#dbdee1;background:#1e1f22;padding:24px;min-height:100vh;box-sizing:border-box">' +
-            '<h2 style="color:#f2f3f5">Atualize o WebView do Android</h2>' +
-            '<p>O Discord Local usa o navegador interno do Android, que está desatualizado neste celular' + (v ? ' (versão ' + v + ')' : '') + '.</p>' +
-            '<p>Abra a <b>Play Store</b>, procure <b>Android System WebView</b> (e o <b>Google Chrome</b>) e toque em <b>Atualizar</b>. Depois abra o app de novo.</p>' +
-            (extra ? '<p style="color:#949ba4;font-size:13px">' + extra + '</p>' : '') +
+            (old
+              ? '<h2 style="color:#f2f3f5">Atualize o WebView do Android</h2>' +
+                '<p>O Discord Local usa o navegador interno do Android, que está desatualizado neste celular (versão ' + v + ').</p>' +
+                '<p>Abra a <b>Play Store</b>, procure <b>Android System WebView</b> e toque em <b>Atualizar</b>. Depois abra o app de novo.</p>'
+              : '<h2 style="color:#f2f3f5">O app deu erro ao abrir</h2>' +
+                '<p>Tire um print desta tela e mande pra quem cuida do app.</p>' +
+                '<p style="color:#949ba4;font-size:13px">WebView ' + (v || '?') + ' · ' + navigator.userAgent.replace(/</g, '') + '</p>') +
+            (extra ? '<p style="color:#f23f43;font-size:13px;word-break:break-word">' + String(extra).replace(/</g, '&lt;') + '</p>' : '') +
             '</div>';
         }
         if (v && v < 87) warn('');
         window.addEventListener('error', function (e) {
-          if (!window.__dlBooted) setTimeout(function () { warn('Erro: ' + (e && e.message)); }, 0);
+          if (!window.__dlBooted) setTimeout(function () { warn('Erro: ' + (e && e.message) + (e && e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : '')); }, 0);
         });
+        window.addEventListener('unhandledrejection', function (e) {
+          if (!window.__dlBooted) setTimeout(function () { warn('Erro: ' + (e && e.reason && (e.reason.message || e.reason))); }, 0);
+        });
+        // Subiu, mas a tela ficou vazia (erro ao desenhar): mostra em vez do cinza.
+        setTimeout(function () {
+          var r = document.getElementById('root');
+          if (r && !r.childNodes.length) warn(window.__dlLastError || 'a interface não apareceu em 8 s');
+        }, 8000);
+        window.addEventListener('error', function (e) { window.__dlLastError = 'Erro: ' + (e && e.message); });
       })();
     </script>
     <script type="module" src="/src/main.ts"></script>

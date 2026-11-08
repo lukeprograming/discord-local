@@ -47,6 +47,8 @@ export type Settings = {
   mic_threshold?: number | null;
   /** Supressão de ruído do microfone. Ausente = padrão (GTCRN). */
   mic_noise?: 'off' | 'native' | 'rnnoise' | 'gtcrn';
+  /** Nivelador de voz (quem fala longe do microfone). Padrão: ligado no celular. */
+  mic_level?: boolean;
   /** Atalhos (formato do Electron, ex. "CommandOrControl+Shift+M"); '' = desligado. */
   hotkey_mute?: string;
   hotkey_deafen?: string;
