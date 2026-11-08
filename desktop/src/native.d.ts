@@ -65,6 +65,9 @@ declare global {
       flash(): Promise<void>;
       onChooseScreen(cb: (sources: ScreenSource[]) => void): () => void;
       screenPicked(id: string | null): Promise<void>;
+      /** Linux: cria a fonte virtual com o áudio do PC (sem o próprio app). Devolve o nome do dispositivo. */
+      shareAudioStart?(): Promise<string>;
+      shareAudioStop?(): Promise<void>;
       interfaces(): Promise<NetInterface[]>;
       hostStart(cfg: HostConfig): Promise<HostStatus>;
       hostStop(): Promise<HostStatus>;

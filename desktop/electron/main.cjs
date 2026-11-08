@@ -5,6 +5,7 @@ const { LocalStore } = require('./store.cjs');
 const host = require('./host.cjs');
 const embed = require('./embed.cjs');
 const updater = require('./updater.cjs');
+const linuxAudio = require('./linux-audio.cjs');
 
 // Releases de onde vêm as atualizações e os instaladores limpos para exportar.
 const GITHUB_REPO = 'lukeprograming/discord-local';
@@ -111,6 +112,11 @@ function setupIpc() {
   ipcMain.handle('store:dataDir', () => store.dir);
   ipcMain.handle('store:openDataDir', () => shell.openPath(store.dir));
   ipcMain.handle('screen:picked', (_e, id) => pendingPick?.(id));
+  // Áudio do PC na transmissão (Linux): fonte virtual do PipeWire sem o som do próprio app.
+  ipcMain.handle('share-audio:start', () =>
+    linuxAudio.start(() => [process.pid, ...app.getAppMetrics().map((m) => m.pid)]),
+  );
+  ipcMain.handle('share-audio:stop', () => linuxAudio.stop());
   ipcMain.handle('app:info', () => ({ platform: process.platform, profile, version: app.getVersion() }));
   ipcMain.handle('app:flash', () => {
     if (win && !win.isFocused()) win.flashFrame(true);
@@ -279,6 +285,8 @@ app.whenReady().then(() => {
   updater.init((st) => win?.webContents.send('update:status', st));
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });
+
+app.on('will-quit', () => linuxAudio.stopSync());
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

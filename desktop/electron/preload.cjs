@@ -16,6 +16,11 @@ contextBridge.exposeInMainWorld('native', {
     return () => ipcRenderer.removeListener('screen:choose', listener);
   },
   screenPicked: (id) => ipcRenderer.invoke('screen:picked', id),
+  // Só no Linux (no Windows o áudio vem direto do getDisplayMedia).
+  ...(process.platform === 'linux' && {
+    shareAudioStart: () => ipcRenderer.invoke('share-audio:start'),
+    shareAudioStop: () => ipcRenderer.invoke('share-audio:stop'),
+  }),
   interfaces: () => ipcRenderer.invoke('net:interfaces'),
   hostStart: (cfg) => ipcRenderer.invoke('host:start', cfg),
   hostStop: () => ipcRenderer.invoke('host:stop'),

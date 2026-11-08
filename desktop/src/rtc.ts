@@ -229,12 +229,24 @@ export class CallSession {
 
   async startScreen(preset: ScreenPreset, withAudio: boolean, hint: 'detail' | 'motion'): Promise<void> {
     const cfg = SCREEN_PRESETS[preset];
+    // No Linux o áudio vem de uma fonte virtual do PipeWire (o loopback do Chromium só existe no Windows).
+    const linuxAudio = withAudio && !!window.native?.shareAudioStart;
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: { width: { ideal: cfg.width }, height: { ideal: cfg.height }, frameRate: { ideal: cfg.fps, max: cfg.fps } },
-      audio: withAudio,
+      audio: withAudio && !linuxAudio,
     });
+    if (linuxAudio) {
+      try {
+        stream.addTrack(await captureLinuxSystemAudio());
+      } catch (e) {
+        for (const t of stream.getTracks()) t.stop();
+        window.native.shareAudioStop?.();
+        throw e;
+      }
+    }
     this.stopScreen();
     this.screen = stream;
+    this.screenLinuxAudio = linuxAudio;
     const video = stream.getVideoTracks()[0];
     video.contentHint = hint;
     // Usuário clicou em "parar compartilhamento" na barra do sistema.
@@ -251,6 +263,8 @@ export class CallSession {
   stopScreen(): void {
     if (!this.screen) return;
     for (const t of this.screen.getTracks()) t.stop();
+    if (this.screenLinuxAudio) window.native.shareAudioStop?.();
+    this.screenLinuxAudio = false;
     this.screen = null;
     this.screenCfg = null;
     // Remove as tracks da tela (vídeo e, no Windows, o áudio do sistema) → renegocia.
@@ -308,6 +322,7 @@ export class CallSession {
     for (const id of [...this.peers.keys()]) this.closePeer(id);
     for (const t of this.mic?.getTracks() ?? []) t.stop();
     for (const t of this.screen?.getTracks() ?? []) t.stop();
+    if (this.screenLinuxAudio) window.native.shareAudioStop?.();
     for (const t of this.camera?.getTracks() ?? []) t.stop();
     this.micProc?.destroy();
     this.audioCtx.close();
@@ -316,6 +331,7 @@ export class CallSession {
   // ---- internos ----
 
   private screenCfg: { bitrate: number; fps: number } | null = null;
+  private screenLinuxAudio = false;
 
   private createPeer(connectionId: string, userId: string): Peer {
     log('createPeer', connectionId.slice(-4), 'mic=' + !!this.mic);
@@ -547,4 +563,27 @@ function preferCodec(tr: RTCRtpTransceiver, mime: string): void {
   } catch {
     /* codec indisponível: mantém o padrão */
   }
+}
+
+/** Linux: cria a fonte virtual (no processo principal) e abre ela como se fosse um microfone. */
+async function captureLinuxSystemAudio(): Promise<MediaStreamTrack> {
+  const label = await window.native.shareAudioStart!();
+  // O Chromium leva um instante para enxergar o dispositivo novo.
+  for (let i = 0; i < 20; i++) {
+    const dev = (await navigator.mediaDevices.enumerateDevices()).find((d) => d.kind === 'audioinput' && d.label === label);
+    if (dev) {
+      const s = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: { exact: dev.deviceId },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 2,
+        },
+      });
+      return s.getAudioTracks()[0];
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  throw new Error('a fonte de áudio virtual não apareceu');
 }

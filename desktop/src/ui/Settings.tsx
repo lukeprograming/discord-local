@@ -18,7 +18,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
       .finally(() => navigator.mediaDevices.enumerateDevices().then(setDevices));
   }, []);
 
-  const inputs = devices.filter((d) => d.kind === 'audioinput');
+  // A fonte virtual do áudio da transmissão (Linux) não é microfone de verdade.
+  const inputs = devices.filter((d) => d.kind === 'audioinput' && !d.label.startsWith('Discord Local ('));
   const outputs = devices.filter((d) => d.kind === 'audiooutput');
   const cameras = devices.filter((d) => d.kind === 'videoinput');
 

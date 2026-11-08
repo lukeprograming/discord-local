@@ -279,10 +279,15 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
           <input type="radio" checked={hint === 'motion'} onChange={() => setHint('motion')} />
           Jogo / vídeo <small className="muted">prioriza fluidez</small>
         </label>
-        {platform === 'win32' && (
+        {(platform === 'win32' || platform === 'linux') && (
           <label className="check">
             <input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} />
-            Transmitir o áudio do PC <small className="muted">(use fone, senão os outros ouvem o próprio eco)</small>
+            Transmitir o áudio do PC{' '}
+            <small className="muted">
+              {platform === 'win32'
+                ? '(use fone, senão os outros ouvem o próprio eco)'
+                : '(tudo que toca no PC, menos as vozes da call)'}
+            </small>
           </label>
         )}
         <div className="modal-actions">
