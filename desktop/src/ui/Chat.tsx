@@ -9,7 +9,7 @@ import { Avatar, formatTime } from './common.tsx';
 import { VoiceMessage, VoiceRecorder } from './Voice.tsx';
 import { FileCard, UploadList } from './FileCard.tsx';
 import { sendFiles } from '../files.ts';
-import { parseYouTube, queuePlaylist, queueYouTube } from '../youtube.ts';
+import { parseMedia, parseYouTube, queuePlaylist, queueYouTube } from '../youtube.ts';
 
 const GROUP_WINDOW_MS = 5 * 60_000;
 const URL_RE = /(https?:\/\/[^\s<]+)/g;
@@ -210,6 +210,13 @@ export function Chat({ conversation }: { conversation: Conversation }) {
                 : peer && (s.presences[peer.id] === 'ONLINE' ? peerStatusLine(peer.id) : 'offline')}
           </small>
         </div>
+        <button
+          className={`icon ${app.isFavConversation(conversation.id) ? 'fav-on' : ''}`}
+          title={app.isFavConversation(conversation.id) ? 'Tirar dos favoritos' : 'Favoritar conversa (fica no topo da lateral)'}
+          onClick={() => app.toggleFavConversation(conversation.id)}
+        >
+          {app.isFavConversation(conversation.id) ? '★' : '☆'}
+        </button>
         {peer && (
           <button className="icon" title={`Pasta compartilhada de ${peer.display_name}`} disabled={s.connection !== 'online'} onClick={() => setFolderOf(peer.id)}>
             📁
@@ -277,6 +284,7 @@ export function Chat({ conversation }: { conversation: Conversation }) {
                     <div className="msg-head">
                       <strong>{author?.display_name ?? 'Desconhecido'}</strong>
                       <small className="muted">{formatTime(m.created_at)}</small>
+                      {app.isFavMessage(m.id) && <small className="fav-star" title="Favorita">★</small>}
                     </div>
                   )}
                   {m.deleted ? (
@@ -329,6 +337,15 @@ export function Chat({ conversation }: { conversation: Conversation }) {
                   <div className="msg-actions" onClick={(e) => e.stopPropagation()}>
                     <button title="Reagir" onClick={() => setPickerFor(pickerFor === m.id ? null : m.id)}>😀</button>
                     <button title="Responder" onClick={() => reply(m)}>↩</button>
+                    <button
+                      title={app.isFavMessage(m.id) ? 'Tirar dos favoritos' : 'Favoritar mensagem'}
+                      onClick={() => {
+                        app.toggleFavMessage(conversation.id, m.id);
+                        setMenuFor(null);
+                      }}
+                    >
+                      {app.isFavMessage(m.id) ? '★' : '☆'}
+                    </button>
                     {canEdit(m) && <button title="Editar" onClick={() => { setEditing(m.id); setMenuFor(null); }}>✏️</button>}
                     {mine && <button title="Apagar" onClick={() => remove(m)}>🗑</button>}
                     {pickerFor === m.id && (
@@ -489,7 +506,7 @@ function Linkify({ text }: { text: string }) {
             <a href={p} target="_blank" rel="noreferrer">
               {p}
             </a>
-            {app.state.call && parseYouTube(p)?.id && (
+            {app.state.call && (parseYouTube(p)?.id || parseMedia(p)) && (
               <button
                 className="mini yt-play"
                 title="Tocar no bot do YouTube da call (todos ouvem juntos)"

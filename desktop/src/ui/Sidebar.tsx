@@ -3,7 +3,7 @@ import { app, useApp } from '../app.ts';
 import type { Availability, Conversation } from '../../../shared/protocol.ts';
 import { Avatar, PromptModal } from './common.tsx';
 import { Settings } from './Settings.tsx';
-import { Search } from './Search.tsx';
+import { FavoriteMessages, Search } from './Search.tsx';
 import { UpdateBanner } from './Update.tsx';
 
 export function Sidebar() {
@@ -13,6 +13,7 @@ export function Sidebar() {
   const [settings, setSettings] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [favsOpen, setFavsOpen] = useState(false);
   // Ctrl+K / Ctrl+Shift+F abrem a busca de qualquer lugar.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -30,9 +31,11 @@ export function Sidebar() {
 
   const incoming = s.friends.filter((f) => f.status === 'INCOMING');
   const outgoing = s.friends.filter((f) => f.status === 'OUTGOING');
-  const directs = s.conversations.filter((c) => c.type === 'DIRECT');
-  const groups = s.conversations.filter((c) => c.type === 'GROUP');
-  const rooms = s.conversations.filter((c) => c.type === 'ROOM');
+  const favs = s.conversations.filter((c) => app.isFavConversation(c.id));
+  const notFav = (c: Conversation) => !app.isFavConversation(c.id);
+  const directs = s.conversations.filter((c) => c.type === 'DIRECT' && notFav(c));
+  const groups = s.conversations.filter((c) => c.type === 'GROUP' && notFav(c));
+  const rooms = s.conversations.filter((c) => c.type === 'ROOM' && notFav(c));
   const friendIds = new Set(s.friends.filter((f) => f.status === 'ACCEPTED').map((f) => f.user.id));
 
   const convItem = (c: (typeof s.conversations)[number]) => {
@@ -136,6 +139,7 @@ export function Sidebar() {
             <>
               ● host offline — histórico disponível
               <button className="link" onClick={() => app.reconnectNow()}>tentar agora</button>
+              <button className="link" title="O host mudou de VPN/IP? Troque o endereço" onClick={() => setSettings(true)}>mudar endereço</button>
             </>
           )}
         </div>
@@ -156,7 +160,14 @@ export function Sidebar() {
           </section>
         )}
 
-        {rooms.length > 0 && (
+        {favs.length > 0 && (
+          <section>
+            <h5>⭐ Favoritos</h5>
+            {favs.map((c) => (c.type === 'ROOM' ? roomItem(c) : convItem(c)))}
+          </section>
+        )}
+
+        {(rooms.length > 0 || s.admin) && (
           <section>
             <h5>
               Salas
@@ -204,6 +215,7 @@ export function Sidebar() {
             <small className="muted">{myStatus.text || myStatus.emoji ? `${myStatus.emoji} ${myStatus.text}` : `@${me.username}`}</small>
           </div>
         </button>
+        <button className="icon" title="Mensagens favoritas" onClick={() => setFavsOpen(true)}>⭐</button>
         <button className="icon" title="Buscar mensagens (Ctrl+K)" onClick={() => setSearching(true)}>🔍</button>
         <button className="icon" title="Configurações" onClick={() => setSettings(true)}>⚙</button>
       </div>
@@ -213,6 +225,7 @@ export function Sidebar() {
       {settings && <Settings onClose={() => setSettings(false)} />}
       {statusOpen && <StatusEditor onClose={() => setStatusOpen(false)} />}
       {searching && <Search onClose={() => setSearching(false)} />}
+      {favsOpen && <FavoriteMessages onClose={() => setFavsOpen(false)} />}
       {roomPrompt?.mode === 'create' && (
         <PromptModal
           title="Nova sala"

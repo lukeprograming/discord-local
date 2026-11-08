@@ -20,7 +20,7 @@ import type {
   ClientOps,
 } from '../../shared/protocol.ts';
 import { isMutation, MAX_MESSAGE_LENGTH } from '../../shared/protocol.ts';
-import { GatewayClient, httpPost } from './gateway.ts';
+import { checkServer, GatewayClient, httpPost } from './gateway.ts';
 import { CallSession, type AudioKind, type ScreenPreset } from './rtc.ts';
 import { DEFAULT_NOISE, type MicSettings } from './mic.ts';
 import { ulid } from './ulid.ts';
@@ -213,6 +213,26 @@ class App {
     const me = this.me();
     if (!me) return false;
     return new RegExp(`(^|[^\\w@])@(${me.username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|todos|everyone)\\b`, 'i').test(text);
+  }
+
+  isFavConversation(id: string): boolean {
+    return !!this.state.profile?.settings?.fav_conversations?.includes(id);
+  }
+
+  async toggleFavConversation(id: string): Promise<void> {
+    const list = this.state.profile?.settings?.fav_conversations ?? [];
+    await this.saveSettings({ fav_conversations: list.includes(id) ? list.filter((x) => x !== id) : [...list, id] });
+  }
+
+  isFavMessage(id: string): boolean {
+    return !!this.state.profile?.settings?.fav_messages?.some((f) => f.m === id);
+  }
+
+  async toggleFavMessage(conversationId: string, id: string): Promise<void> {
+    const list = this.state.profile?.settings?.fav_messages ?? [];
+    await this.saveSettings({
+      fav_messages: list.some((f) => f.m === id) ? list.filter((f) => f.m !== id) : [...list, { c: conversationId, m: id }],
+    });
   }
 
   isMuted(conversationId: string): boolean {
@@ -560,6 +580,33 @@ class App {
 
   reconnectNow(): void {
     this.gw?.reconnectNow();
+  }
+
+  /**
+   * Quem conecta: o host mudou de VPN (ZeroTier/Hamachi/Tailscale) ou de IP.
+   * A conta é a mesma (mesmo servidor), só o endereço muda.
+   */
+  async changeServer(input: string): Promise<string> {
+    const p = this.state.profile;
+    if (!p) throw new Error('sem perfil');
+    let url = input.trim();
+    if (!url) throw new Error('digite o endereço do host');
+    if (!/^https?:\/\//i.test(url)) url = `http://${url}`;
+    let u: URL;
+    try {
+      u = new URL(url);
+    } catch {
+      throw new Error('endereço inválido (ex.: 10.147.18.244 ou 25.20.177.202:47200)');
+    }
+    if (!u.port) u.port = new URL(p.server_url).port || '47200';
+    const server = `${u.protocol}//${u.host}`;
+    await checkServer(server); // responde? (erro claro se não)
+    if (this.state.call) this.leaveCall();
+    const profile = { ...p, server_url: server };
+    await window.native.saveProfile(profile);
+    this.set({ profile });
+    this.connect(profile);
+    return server;
   }
 
   private saveCache(): void {
@@ -1008,7 +1055,7 @@ class App {
     const s = this.state.call;
     if (!s) return;
     try {
-      await s.startScreen(preset, withAudio, hint, audioApps);
+      await s.startScreen(preset, withAudio, hint, audioApps, !!this.state.profile?.settings?.share_include_voice_apps);
       this.saveSettings({ screen_preset: preset });
     } catch (e) {
       if ((e as Error).name !== 'NotAllowedError') this.toast(`Não consegui capturar a tela: ${(e as Error).message}`);

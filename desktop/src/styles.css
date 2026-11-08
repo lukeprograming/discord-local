@@ -479,3 +479,70 @@ button.danger { background: var(--red); color: white; }
 .folder-dl { opacity: 0; }
 .folder-row:hover .folder-dl { opacity: 1; }
 .folder-jobs { display: flex; flex-direction: column; gap: 4px; }
+.sub-check { margin-left: 26px; font-size: 13px; } .warn-text { color: #f0b232; }
+.fav-on { color: #f0b232 !important; }
+.fav-star { color: #f0b232; }
+.fav-row { display: flex; align-items: center; gap: 4px; }
+.fav-row .search-hit { flex: 1; }
+
+/* ---- 0.8: tiles de vídeo e player ---- */
+.stream-tile, .bot-tile { position: relative; }
+.tile-top { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 8px; padding: 10px 12px 22px; background: linear-gradient(rgba(0,0,0,.7), transparent); color: #fff; font-size: 13px; pointer-events: none; transition: opacity .25s; z-index: 2; }
+.tile-top strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 2px #000; }
+.live-badge, .yt-badge { flex-shrink: 0; font-size: 10px; font-weight: 800; letter-spacing: .04em; padding: 2px 6px; border-radius: 4px; color: #fff; }
+.live-badge { background: var(--red); }
+.yt-badge { background: #ff0033; }
+.tile-actions { position: absolute; right: 10px; bottom: 10px; display: flex; align-items: center; gap: 6px; transition: opacity .25s; z-index: 2; }
+.tile-btn { width: 36px; height: 36px; border-radius: 50%; padding: 0; font-size: 16px; background: rgba(17,18,20,.75); color: #fff; backdrop-filter: blur(4px); }
+.tile-btn:hover { background: var(--accent); }
+.tile-vol { display: flex; align-items: center; gap: 4px; background: rgba(17,18,20,.75); border-radius: 18px; padding: 4px 10px; color: #fff; }
+.tile-vol input { width: 80px; }
+.stream-tile .tile-top, .stream-tile .tile-actions { opacity: 0; }
+.stream-tile:hover .tile-top, .stream-tile:hover .tile-actions { opacity: 1; }
+.screen-tile.idle { cursor: none; }
+.screen-tile.idle .tile-top, .screen-tile.idle .tile-actions, .screen-tile.idle .player-controls { opacity: 0 !important; }
+.screen-tile:fullscreen { border-radius: 0; background: #000; }
+.screen-tile:fullscreen video, .screen-tile:fullscreen .bot-video { width: 100vw; height: 100vh; }
+
+.player-controls { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; padding: 26px 12px 8px; background: linear-gradient(transparent, rgba(0,0,0,.85)); transition: opacity .25s; display: flex; flex-direction: column; gap: 2px; color: #fff; }
+.bot-tile:not(:hover):not(.audio-only) .player-controls { opacity: 0; }
+.seek-wrap { --pct: 0%; }
+.seek { width: 100%; height: 14px; -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; margin: 0; }
+.seek::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, #ff0033 var(--pct), rgba(255,255,255,.3) var(--pct)); }
+.seek:hover::-webkit-slider-runnable-track { height: 6px; }
+.seek::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #ff0033; margin-top: -5px; opacity: 0; transition: opacity .15s; }
+.seek:hover::-webkit-slider-thumb { opacity: 1; }
+.player-row { display: flex; align-items: center; gap: 6px; }
+.pbtn { background: none; color: #fff; font-size: 17px; width: 38px; height: 38px; padding: 0; border-radius: 50%; }
+.pbtn:hover { background: rgba(255,255,255,.15); }
+.pbtn.big { font-size: 20px; width: 44px; height: 44px; }
+.player-time { font-size: 13px; font-variant-numeric: tabular-nums; opacity: .9; white-space: nowrap; }
+.player-spacer { flex: 1; }
+.player-vol { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.player-vol input { width: 0; opacity: 0; transition: width .2s, opacity .2s; }
+.player-vol:hover input, .player-vol input:focus { width: 90px; opacity: 1; }
+.bot-tile.audio-only { max-height: none; min-height: 0; align-self: start; }
+.bot-tile.audio-only .player-controls { position: static; background: var(--bg-1); padding: 10px 12px; color: var(--text); }
+.bot-tile.audio-only .pbtn { color: var(--text); }
+.bot-tile.audio-only .seek::-webkit-slider-runnable-track { background: linear-gradient(to right, #ff0033 var(--pct), var(--bg-3) var(--pct)); }
+.player-now { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; min-width: 0; }
+.player-now > div { display: flex; flex-direction: column; min-width: 0; }
+.player-now strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-now .bot-thumb { width: 80px; height: 45px; }
+.now-card { display: flex; align-items: center; gap: 12px; background: var(--bg-3); border-radius: 10px; padding: 8px; }
+.now-card img { width: 128px; height: 72px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+.now-card > div { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.now-card strong { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.queue-title { margin: 4px 0 0; font-size: 12px; text-transform: uppercase; color: var(--muted); }
+.queue-n { width: 18px; text-align: right; color: var(--muted); font-size: 12px; flex-shrink: 0; }
+.link-yt { display: flex; align-items: center; gap: 10px; background: var(--bg-2); border-radius: 8px; padding: 6px; font-size: 13px; }
+.link-yt img { width: 80px; height: 45px; object-fit: cover; border-radius: 4px; }
+.yt-badge.src-spotify { background: #1db954; }
+.yt-badge.src-soundcloud { background: #ff5500; }
+.preview-banner { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); z-index: 4; display: flex; align-items: center; gap: 8px; background: rgba(29,185,84,.92); color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 13px; white-space: nowrap; }
+.link-src { width: 80px; text-align: center; font-size: 24px; }
+/* tela cheia feita pelo app (tile ocupa a janela; a janela vai pra tela cheia) */
+.screen-tile.tile-fs { position: fixed !important; inset: 0; z-index: 1000; border-radius: 0; background: #000; max-height: none !important; }
+.screen-tile.tile-fs video { width: 100vw; height: 100vh; object-fit: contain; }
+.screen-tile.tile-fs .bot-video { position: absolute; inset: 0; }
+body.has-tile-fs { overflow: hidden; }

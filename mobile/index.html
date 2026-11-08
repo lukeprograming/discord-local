@@ -3,12 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self' http: ws: https://api.github.com https://www.youtube.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com; img-src 'self' data: blob: https://i.ytimg.com; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self' http: ws: https://api.github.com https://www.youtube.com https://soundcloud.com https://open.spotify.com; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com https://open.spotify.com; img-src 'self' data: blob: https://i.ytimg.com https://*.sndcdn.com https://i.scdn.co https://*.spotifycdn.com; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'" />
     <meta name="theme-color" content="#1e1f22" />
     <title>Discord Local</title>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // WebView do sistema velho (celular sem atualizar o "Android System WebView"): avisa em vez de tela branca.
+      (function () {
+        var m = /Chrome\/(\d+)/.exec(navigator.userAgent);
+        var v = m ? parseInt(m[1], 10) : 0;
+        function warn(extra) {
+          var r = document.getElementById('root');
+          if (!r || r.childNodes.length) return;
+          r.innerHTML =
+            '<div style="font:16px sans-serif;color:#dbdee1;background:#1e1f22;padding:24px;min-height:100vh;box-sizing:border-box">' +
+            '<h2 style="color:#f2f3f5">Atualize o WebView do Android</h2>' +
+            '<p>O Discord Local usa o navegador interno do Android, que está desatualizado neste celular' + (v ? ' (versão ' + v + ')' : '') + '.</p>' +
+            '<p>Abra a <b>Play Store</b>, procure <b>Android System WebView</b> (e o <b>Google Chrome</b>) e toque em <b>Atualizar</b>. Depois abra o app de novo.</p>' +
+            (extra ? '<p style="color:#949ba4;font-size:13px">' + extra + '</p>' : '') +
+            '</div>';
+        }
+        if (v && v < 87) warn('');
+        window.addEventListener('error', function (e) {
+          if (!window.__dlBooted) setTimeout(function () { warn('Erro: ' + (e && e.message)); }, 0);
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

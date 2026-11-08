@@ -21,6 +21,7 @@ let timer = null;
 let syncing = false;
 let ownPids = () => [process.pid];
 let onlyApps = null; // null = todos os apps; senão, só as chaves escolhidas (ver appKey)
+let skipVoiceApps = true; // no modo "todos": deixa Discord oficial e afins de fora
 
 function run(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -61,6 +62,13 @@ async function inUse(sourceName) {
   return out.includes(`target.object = "${sourceName}"`);
 }
 
+// Clientes de voz (Discord oficial e afins): por padrão ficam fora do "tudo que toca no PC",
+// senão as vozes da call do Discord vazam na transmissão.
+const VOICE_APPS = /^(discord|discordcanary|discordptb|discord-canary|discord-ptb|vesktop|webcord|legcord|armcord|equibop|teamspeak|ts3client.*|mumble|skype|zoom|teams)$/i;
+function isVoiceApp(props) {
+  return VOICE_APPS.test(String(props['application.process.binary'] || '')) || /^WEBRTC VoiceEngine$/i.test(String(props['application.name'] || '') ) && /discord/i.test(String(props['application.process.binary'] || ''));
+}
+
 /** Identifica o app pelo executável (os streams vêm e vão, o PID do navegador muda). */
 function appKey(props) {
   return String(props['application.process.binary'] || props['application.name'] || props['node.name'] || '?');
@@ -90,7 +98,7 @@ async function listApps(getOwnPids) {
     const p = n.info?.props ?? {};
     const key = appKey(p);
     const name = String(p['application.name'] || key);
-    const app = apps.get(key) ?? { key, name, detail: key !== name ? key : '' };
+    const app = apps.get(key) ?? { key, name, detail: key !== name ? key : '', voice: isVoiceApp(p) };
     apps.set(key, app);
   }
   return [...apps.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -125,7 +133,9 @@ async function sync() {
     if (!inputIds.size) return;
 
     const streamIds = new Set(
-      streams.filter((n) => !onlyApps || onlyApps.has(appKey(props(n)))).map((n) => n.id),
+      streams
+        .filter((n) => (onlyApps ? onlyApps.has(appKey(props(n))) : !(skipVoiceApps && isVoiceApp(props(n)))))
+        .map((n) => n.id),
     );
 
     const want = new Set();
@@ -157,11 +167,12 @@ async function sync() {
 }
 
 /** Cria a fonte virtual e começa a ligar os apps nela. Devolve o nome que aparece no getUserMedia. */
-async function start(getOwnPids, only) {
+async function start(getOwnPids, only, includeVoiceApps = false) {
   if (process.platform !== 'linux') throw new Error('Só no Linux');
   if (getOwnPids) ownPids = getOwnPids;
   await stop();
   onlyApps = Array.isArray(only) && only.length ? new Set(only.map(String)) : null;
+  skipVoiceApps = !includeVoiceApps;
   await unloadStale();
   try {
     await run('pw-dump', ['--version']);

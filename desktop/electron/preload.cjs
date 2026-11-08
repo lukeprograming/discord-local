@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('native', {
   saveOutbox: (list) => ipcRenderer.invoke('store:saveOutbox', list),
   openDataDir: () => ipcRenderer.invoke('store:openDataDir'),
   fetchUrl: (url, kind) => ipcRenderer.invoke('net:fetchUrl', url, kind),
+  spotifyLogin: () => ipcRenderer.invoke('spotify:login'),
+  spotifyStatus: () => ipcRenderer.invoke('spotify:status'),
+  spotifyLogout: () => ipcRenderer.invoke('spotify:logout'),
   sharePick: () => ipcRenderer.invoke('share:pick'),
   shareList: (root, rel) => ipcRenderer.invoke('share:list', root, rel),
   shareUpload: (root, rel, serverUrl, token, to) => ipcRenderer.invoke('share:upload', root, rel, serverUrl, token, to),
@@ -55,6 +58,7 @@ contextBridge.exposeInMainWorld('native', {
   flash: () => ipcRenderer.invoke('app:flash'),
   focusMain: () => ipcRenderer.invoke('app:focus'),
   idleSeconds: () => ipcRenderer.invoke('app:idle'),
+  setFullscreen: (on) => ipcRenderer.invoke('app:fullscreen', on),
   onChooseScreen: (cb) => {
     const listener = (_e, sources) => cb(sources);
     ipcRenderer.on('screen:choose', listener);
@@ -64,7 +68,7 @@ contextBridge.exposeInMainWorld('native', {
   // Só no Linux (no Windows o áudio vem direto do getDisplayMedia).
   ...(process.platform === 'linux' && {
     shareAudioApps: () => ipcRenderer.invoke('share-audio:apps'),
-    shareAudioStart: (only) => ipcRenderer.invoke('share-audio:start', only),
+    shareAudioStart: (only, includeVoice) => ipcRenderer.invoke('share-audio:start', only, includeVoice),
     shareAudioStop: () => ipcRenderer.invoke('share-audio:stop'),
   }),
   interfaces: () => ipcRenderer.invoke('net:interfaces'),

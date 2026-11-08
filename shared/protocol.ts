@@ -102,10 +102,22 @@ export type CallParticipant = {
 /** Item da fila do bot de YouTube. */
 export type MediaItem = {
   id: string;
-  video_id: string; // 11 caracteres
+  video_id: string; // YouTube: 11 caracteres; Spotify: id da faixa (22); SoundCloud: vazio
   title: string;
   added_by: string; // user_id
+  /** De onde vem (ausente = youtube, versões antigas). */
+  source?: MediaSource;
+  /** SoundCloud: link da faixa (https://soundcloud.com/artista/faixa). */
+  url?: string;
+  /** Capa (SoundCloud; no YouTube vem do id). */
+  thumb?: string;
 };
+
+export type MediaSource = 'youtube' | 'soundcloud' | 'spotify';
+export const SPOTIFY_ID_RE = /^[A-Za-z0-9]{22}$/;
+export const SOUNDCLOUD_URL_RE = /^https:\/\/(?:www\.|m\.)?soundcloud\.com\/[\w-]+\/(?:sets\/)?[\w-]+\/?$/;
+export const SOUNDCLOUD_THUMB_RE = /^https:\/\/i\d?\.sndcdn\.com\/[\w./-]+$/;
+export const SPOTIFY_THUMB_RE = /^https:\/\/(?:i\.scdn\.co|image-cdn-[a-z]+\.spotifycdn\.com|[\w-]+\.spotifycdn\.com)\/[\w./-]+$/;
 
 /**
  * Estado do bot de YouTube: cada um toca no próprio app e se ajusta a isso.
@@ -122,7 +134,7 @@ export type MediaState = {
 };
 
 export type MediaAction =
-  | { type: 'add'; video_id: string; title: string; start?: number; play_now?: boolean }
+  | { type: 'add'; video_id: string; title: string; start?: number; play_now?: boolean; source?: MediaSource; url?: string; thumb?: string }
   /** Playlist: vários de uma vez (play_now troca a fila atual pela playlist). */
   | { type: 'add_many'; items: { video_id: string; title: string }[]; play_now?: boolean }
   /** Embaralha o que vem depois do vídeo atual. */

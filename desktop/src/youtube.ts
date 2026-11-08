@@ -1,6 +1,6 @@
 // Links do YouTube: extrair id/tempo e buscar o título (oEmbed, sem chave de API).
 
-import { YT_ID_RE } from '../../shared/protocol.ts';
+import { SOUNDCLOUD_URL_RE, SPOTIFY_ID_RE, YT_ID_RE, type MediaItem } from '../../shared/protocol.ts';
 import { app } from './app.ts';
 
 /** id = vídeo (pode faltar em link só de playlist); list = playlist/mix. */
@@ -106,15 +106,73 @@ async function titlesOf(ids: string[], onProgress?: (done: number, total: number
   return out;
 }
 
+// ---- Spotify e SoundCloud ----
+
+export type MediaLink =
+  | { source: 'spotify'; id: string; url: string }
+  | { source: 'soundcloud'; url: string };
+
+/** open.spotify.com/(intl-xx/)track/ID, spotify:track:ID, soundcloud.com/artista/faixa. */
+export function parseMedia(text: string): MediaLink | null {
+  const t = text.trim();
+  const sp = /^spotify:track:([A-Za-z0-9]{22})$/.exec(t) ?? /^https:\/\/open\.spotify\.com\/(?:intl-[a-z-]+\/)?track\/([A-Za-z0-9]{22})/i.exec(t);
+  if (sp && SPOTIFY_ID_RE.test(sp[1])) return { source: 'spotify', id: sp[1], url: `https://open.spotify.com/track/${sp[1]}` };
+  try {
+    const u = new URL(t);
+    if (/^(www\.|m\.)?soundcloud\.com$/.test(u.hostname)) {
+      const clean = `https://soundcloud.com${u.pathname.replace(/\/$/, '')}`;
+      if (SOUNDCLOUD_URL_RE.test(clean) && !/\/sets\//.test(clean)) return { source: 'soundcloud', url: clean };
+    }
+  } catch {
+    /* não é URL */
+  }
+  return null;
+}
+
+/** Título e capa pelo oEmbed do próprio serviço. */
+export async function mediaInfo(link: MediaLink): Promise<{ title: string; thumb: string }> {
+  const api =
+    link.source === 'spotify'
+      ? `https://open.spotify.com/oembed?url=${encodeURIComponent(link.url)}`
+      : `https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(link.url)}`;
+  try {
+    const r = await fetch(api, { signal: AbortSignal.timeout(6000) });
+    if (!r.ok) return { title: '', thumb: '' };
+    const j = await r.json();
+    return { title: String(j.title ?? ''), thumb: String(j.thumbnail_url ?? '') };
+  } catch {
+    return { title: '', thumb: '' };
+  }
+}
+
+export function thumbOf(item: Pick<MediaItem, 'source' | 'video_id' | 'thumb'>): string {
+  if (item.source === 'spotify' || item.source === 'soundcloud') return item.thumb || '';
+  return thumb(item.video_id);
+}
+
 /** Põe o link na fila do bot da call atual (ou toca já, se nada estiver tocando). */
 export async function queueYouTube(text: string, playNow = false): Promise<void> {
+  const other = parseMedia(text);
+  if (other) {
+    const { title, thumb: cover } = await mediaInfo(other);
+    await app.media({
+      type: 'add',
+      source: other.source,
+      video_id: other.source === 'spotify' ? other.id : '',
+      url: other.source === 'soundcloud' ? other.url : undefined,
+      title,
+      thumb: cover || undefined,
+      play_now: playNow || undefined,
+    });
+    return;
+  }
   const ref = parseYouTube(text);
   if (!ref?.id) {
     if (ref?.list) {
       await queuePlaylist(text, playNow);
       return;
     }
-    throw new Error('Isso não parece um link de vídeo do YouTube');
+    throw new Error('Isso não parece um link do YouTube, Spotify (música) ou SoundCloud (faixa)');
   }
   const title = await fetchTitle(ref.id);
   await app.media({ type: 'add', video_id: ref.id, title, start: ref.start || undefined, play_now: playNow || undefined });

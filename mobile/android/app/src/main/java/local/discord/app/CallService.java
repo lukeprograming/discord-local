@@ -42,7 +42,9 @@ public class CallService extends Service {
 
         if (Build.VERSION.SDK_INT >= 29) {
             // Microfone só pode ser declarado se a permissão já foi dada (senão o Android 14 derruba o app).
-            boolean mic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+            // O tipo "microfone" só existe a partir do Android 11 (API 30); no Android 10 (ex.: Poco F1) usar dá erro.
+            boolean mic = Build.VERSION.SDK_INT >= 30
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
             int type = mic ? ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
                            : ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
             startForeground(1, n, type);

@@ -1,5 +1,5 @@
-import type { CallInfo, CallParticipant, MediaAction, MediaState } from '../../shared/protocol.ts';
-import { MAX_MEDIA_QUEUE, YT_ID_RE } from '../../shared/protocol.ts';
+import type { CallInfo, CallParticipant, MediaAction, MediaItem, MediaState } from '../../shared/protocol.ts';
+import { MAX_MEDIA_QUEUE, SOUNDCLOUD_THUMB_RE, SOUNDCLOUD_URL_RE, SPOTIFY_ID_RE, SPOTIFY_THUMB_RE, YT_ID_RE } from '../../shared/protocol.ts';
 import { ulid } from './ids.ts';
 
 export class MediaError extends Error {}
@@ -115,10 +115,37 @@ export class Calls {
 
     switch (a?.type) {
       case 'add': {
-        if (typeof a.video_id !== 'string' || !YT_ID_RE.test(a.video_id)) throw new MediaError('link do YouTube inválido');
+        const sc = a.source === 'soundcloud';
+        const sp = a.source === 'spotify';
+        const valid = sc
+          ? typeof a.url === 'string' && SOUNDCLOUD_URL_RE.test(a.url)
+          : sp
+            ? typeof a.video_id === 'string' && SPOTIFY_ID_RE.test(a.video_id)
+            : typeof a.video_id === 'string' && YT_ID_RE.test(a.video_id);
+        if (!valid) throw new MediaError(sc ? 'link do SoundCloud inválido' : sp ? 'link do Spotify inválido' : 'link do YouTube inválido');
         if (m.queue.length >= MAX_MEDIA_QUEUE) throw new MediaError('fila cheia');
-        const title = (typeof a.title === 'string' ? a.title.trim() : '').slice(0, 200) || 'Vídeo do YouTube';
-        const item = { id: ulid(), video_id: a.video_id, title, added_by: userId };
+        const title =
+          (typeof a.title === 'string' ? a.title.trim() : '').slice(0, 200) || (sc ? 'Faixa do SoundCloud' : sp ? 'Música do Spotify' : 'Vídeo do YouTube');
+        const item: MediaItem = sp
+          ? {
+              id: ulid(),
+              video_id: a.video_id,
+              title,
+              added_by: userId,
+              source: 'spotify',
+              ...(typeof a.thumb === 'string' && SPOTIFY_THUMB_RE.test(a.thumb) && { thumb: a.thumb }),
+            }
+          : sc
+          ? {
+              id: ulid(),
+              video_id: '',
+              title,
+              added_by: userId,
+              source: 'soundcloud',
+              url: a.url,
+              ...(typeof a.thumb === 'string' && SOUNDCLOUD_THUMB_RE.test(a.thumb) && { thumb: a.thumb }),
+            }
+          : { id: ulid(), video_id: a.video_id, title, added_by: userId };
         if (!current || a.play_now) {
           if (a.play_now && current) m.queue.shift();
           m.queue.unshift(item);

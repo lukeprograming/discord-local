@@ -66,14 +66,12 @@ export function Settings({ onClose }: { onClose: () => void }) {
             <HotkeySection />
             <hr />
             <SharedFolderSection />
+            <hr />
+            <SpotifySection />
           </>
         )}
         <hr />
-        {profile.role === 'host' ? <HostSection /> : (
-          <p className="small">
-            Host: <code>{profile.server_url}</code>
-          </p>
-        )}
+        {profile.role === 'host' ? <HostSection /> : <ServerAddress />}
         <hr />
         <UpdateSection />
         <hr />
@@ -490,6 +488,81 @@ function SharedFolderSection() {
           Compartilhando: <code>{folder}</code>
         </p>
       )}
+    </>
+  );
+}
+
+/** Quem conecta: trocar o endereço do host (ele mudou de VPN/IP). */
+function ServerAddress() {
+  const current = useApp((s) => s.profile?.server_url ?? '');
+  const connection = useApp((s) => s.connection);
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(() => current.replace(/^https?:\/\//, ''));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  if (!editing) {
+    return (
+      <>
+        <h4>Host</h4>
+        <p className="small">
+          <code>{current}</code> {connection === 'online' ? <span className="ok-text">● conectado</span> : <span className="muted">● sem resposta</span>}
+          <button className="link" onClick={() => setEditing(true)}>mudar endereço</button>
+        </p>
+      </>
+    );
+  }
+  return (
+    <form
+      className="server-address"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setError('');
+        try {
+          const url = await app.changeServer(value);
+          app.toast(`Host trocado para ${url}`);
+          setEditing(false);
+        } catch (err) {
+          setError((err as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <h4>Novo endereço do host</h4>
+      <p className="muted small">Quando o host muda de VPN (ZeroTier, Hamachi, Tailscale) ou de IP. Peça o IP pra ele; a porta normalmente é 47200. Sua conta e histórico continuam.</p>
+      <input autoFocus value={value} placeholder="ex.: 10.147.18.244 ou 25.20.177.202:47200" onChange={(e) => setValue(e.target.value)} />
+      {error && <div className="error">{error}</div>}
+      <div className="modal-actions">
+        <button type="button" onClick={() => setEditing(false)}>Cancelar</button>
+        <button type="submit" className="primary" disabled={busy || !value.trim()}>{busy ? 'Testando…' : 'Testar e conectar'}</button>
+      </div>
+    </form>
+  );
+}
+
+function SpotifySection() {
+  const [logged, setLogged] = useState<boolean | null>(null);
+  const refresh = () => window.native.spotifyStatus?.().then(setLogged);
+  useEffect(() => {
+    refresh();
+  }, []);
+  return (
+    <>
+      <h4>Spotify no bot de música</h4>
+      <p className="muted small">
+        Sem entrar, o Spotify só toca a prévia de 30 s. Cada um entra na própria conta (o login é feito na página do Spotify e fica só neste PC).
+      </p>
+      <div className="export-row">
+        {logged ? (
+          <>
+            <span className="ok-text small">● conectado</span>
+            <button className="red" onClick={() => window.native.spotifyLogout?.().then(refresh)}>Sair do Spotify</button>
+          </>
+        ) : (
+          <button onClick={() => window.native.spotifyLogin?.().then(refresh)}>🟢 Entrar no Spotify</button>
+        )}
+      </div>
     </>
   );
 }

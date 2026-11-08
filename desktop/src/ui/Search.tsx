@@ -135,3 +135,64 @@ function Highlight({ text, q }: { text: string; q: string }) {
     </span>
   );
 }
+
+/** Mensagens marcadas com ⭐ (guardadas só neste aparelho). */
+export function FavoriteMessages({ onClose }: { onClose: () => void }) {
+  const favs = useApp((s) => s.profile?.settings?.fav_messages ?? []);
+  const conversations = useApp((s) => s.conversations);
+  const meId = useApp((s) => s.profile?.user.id);
+  const [items, setItems] = useState<Hit[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const out: Hit[] = [];
+      const byConv = new Map<string, string[]>();
+      for (const f of favs) byConv.set(f.c, [...(byConv.get(f.c) ?? []), f.m]);
+      for (const [c, ids] of byConv) {
+        const conv = conversations.find((x) => x.id === c);
+        if (!conv) continue;
+        const { byId } = materialize(await window.native.loadMessages(c).catch(() => []), meId);
+        for (const id of ids) {
+          const m = byId.get(id);
+          if (m && !m.deleted) out.push({ conv, m, text: textOf(m) });
+        }
+      }
+      if (alive) setItems(out.sort((a, b) => b.m.created_at - a.m.created_at));
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [favs.length]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal search-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>⭐ Mensagens favoritas</h3>
+        <div className="search-results">
+          {!items && <p className="muted small">Carregando…</p>}
+          {items && !items.length && <p className="muted small">Nenhuma ainda. Passe o mouse numa mensagem e clique em ⭐.</p>}
+          {items?.map((h) => (
+            <div key={h.m.id} className="fav-row">
+              <button
+                className="search-hit"
+                onClick={() => {
+                  app.openMessage(h.conv.id, h.m.id);
+                  onClose();
+                }}
+              >
+                <div className="search-meta">
+                  <strong>{app.user(h.m.sender_id)?.display_name ?? '?'}</strong>
+                  <span className="muted">em {app.conversationTitle(h.conv)}</span>
+                  <small className="muted">{formatTime(h.m.created_at)}</small>
+                </div>
+                <span className="search-text">{h.text || '🎤 mensagem de voz'}</span>
+              </button>
+              <button className="icon" title="Tirar dos favoritos" onClick={() => app.toggleFavMessage(h.conv.id, h.m.id)}>✕</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

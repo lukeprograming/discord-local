@@ -52,12 +52,17 @@ export type Settings = {
   hotkey_deafen?: string;
   hotkey_ptt?: string;
   hotkey_clip?: string;
+  /** Linux: no "tudo que toca no PC", incluir também Discord oficial e afins. */
+  share_include_voice_apps?: boolean;
   /** Pasta que os amigos podem navegar e baixar (só desktop). */
   shared_folder?: string;
   /** Volume, só pra mim, do vídeo que estou transmitindo de um arquivo (0–100). */
   video_share_volume?: number;
   /** 'ptt' = microfone só abre segurando a tecla. */
   voice_mode?: 'open' | 'ptt';
+  /** Favoritos (só neste aparelho). */
+  fav_conversations?: string[];
+  fav_messages?: { c: string; m: string }[];
   /** Conversas sem notificação (menção ainda avisa). */
   muted_conversations?: string[];
   /** Volume do soundboard neste aparelho (0–100). */
@@ -82,6 +87,10 @@ declare global {
       openDataDir(): Promise<void>;
       /** Prévia de links: busca fora do renderer (CORS). Só https. */
       fetchUrl?(url: string, kind: 'page' | 'image'): Promise<{ type: string; finalUrl: string; text?: string; dataUrl?: string }>;
+      // ---- Spotify (só desktop): sessão usada pelo player embutido ----
+      spotifyLogin?(): Promise<boolean>;
+      spotifyStatus?(): Promise<boolean>;
+      spotifyLogout?(): Promise<void>;
       // ---- pasta compartilhada (dono: só desktop) ----
       sharePick?(): Promise<string | null>;
       shareList?(root: string, rel: string): Promise<ShareEntry[]>;
@@ -118,13 +127,15 @@ declare global {
       flash(): Promise<void>;
       /** Segundos sem mexer no PC (para o "ausente" automático). */
       idleSeconds?(): Promise<number>;
+      /** Janela inteira em tela cheia (tile em tela cheia / F11). */
+      setFullscreen?(on: boolean): Promise<void>;
       focusMain?(): Promise<void>;
       onChooseScreen(cb: (sources: ScreenSource[]) => void): () => void;
       screenPicked(id: string | null): Promise<void>;
       /** Linux: cria a fonte virtual com o áudio do PC (sem o próprio app). Devolve o nome do dispositivo. */
-      shareAudioStart?(only?: string[] | null): Promise<string>;
+      shareAudioStart?(only?: string[] | null, includeVoiceApps?: boolean): Promise<string>;
       /** Linux: apps tocando som agora (para escolher só alguns na transmissão). */
-      shareAudioApps?(): Promise<{ key: string; name: string; detail: string }[]>;
+      shareAudioApps?(): Promise<{ key: string; name: string; detail: string; voice?: boolean }[]>;
       shareAudioStop?(): Promise<void>;
       interfaces(): Promise<NetInterface[]>;
       hostStart(cfg: HostConfig): Promise<HostStatus>;

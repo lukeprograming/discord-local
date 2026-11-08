@@ -8,6 +8,7 @@ import { sendFiles } from '../files.ts';
 import { BotPanel, BotPlayer } from './YouTubeBot.tsx';
 import { SoundboardPanel } from './Soundboard.tsx';
 import { GamesPanel } from './Games.tsx';
+import { useIdle, useTileFullscreen } from './tile.tsx';
 import { canRecord, saveClip, setVideoVolume, startClipBuffer, startRecording, stopClipBuffer, stopRecording, useRecorder, type Target } from '../recorder.ts';
 import { hotkeyOf, prettyAccel } from '../hotkeys.ts';
 
@@ -104,32 +105,19 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
         <div className="screens">
           {bot && <BotPlayer media={media!} />}
           {(focusedScreen ? [focusedScreen] : screens).map(({ p, stream }) => (
-            <div
+            <StreamTile
               key={p.connection_id}
-              className="screen-tile"
-              title="Clique duas vezes para ampliar"
-              onDoubleClick={() => app.setStage(stage === 'normal' ? 'theater' : 'normal')}
+              stream={stream!}
+              userId={p.user_id}
+              mine={p.connection_id === s.connectionId}
+              recording={!!p.recording}
+              many={screens.length > 1}
+              focused={!!focused}
+              onFocus={() => setFocused(focused ? null : p.connection_id)}
+              onMini={s.platform !== 'android' ? () => openMini(p.connection_id) : undefined}
             >
-              <Video stream={stream!} muted />
               {p.connection_id === s.connectionId && recState.video && <VideoShareControls el={recState.video.el} name={recState.video.name} />}
-              <div className="screen-label">
-                🖥 {app.user(p.user_id)?.display_name}
-                {p.connection_id === s.connectionId && ' (você)'}
-                {screens.length > 1 && (
-                  <button className="mini" onClick={() => setFocused(focused ? null : p.connection_id)}>
-                    {focused ? 'ver todas' : 'só esta'}
-                  </button>
-                )}
-                {s.platform !== 'android' && (
-                  <button className="mini" title="Janelinha sempre por cima dos outros apps" onClick={() => openMini(p.connection_id)}>
-                    miniatura
-                  </button>
-                )}
-                <button className="mini" onClick={(e) => (e.currentTarget.closest('.screen-tile') as HTMLElement)?.requestFullscreen()}>
-                  tela cheia
-                </button>
-              </div>
-            </div>
+            </StreamTile>
           ))}
         </div>
       )}
@@ -320,7 +308,7 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
   const canFile = platform !== 'android' && 'captureStream' in HTMLVideoElement.prototype;
   // Linux: escolher de quais apps vai o som (vazio = o PC todo).
   const [onlySome, setOnlySome] = useState(false);
-  const [apps, setApps] = useState<{ key: string; name: string; detail: string }[] | null>(null);
+  const [apps, setApps] = useState<{ key: string; name: string; detail: string; voice?: boolean }[] | null>(null);
   const [chosen, setChosen] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('share-audio-apps') || '[]');
@@ -404,6 +392,16 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
               <input type="radio" checked={!onlySome} onChange={() => setOnlySome(false)} />
               Tudo que toca no PC
             </label>
+            {!onlySome && (
+              <label className="check sub-check">
+                <input
+                  type="checkbox"
+                  checked={!!profile?.settings?.share_include_voice_apps}
+                  onChange={(e) => app.saveSettings({ share_include_voice_apps: e.target.checked })}
+                />
+                incluir o Discord oficial <small className="muted">(desmarcado: as vozes da call do Discord não vazam na transmissão)</small>
+              </label>
+            )}
             <label className="check">
               <input type="radio" checked={onlySome} onChange={() => setOnlySome(true)} />
               Só os apps que eu escolher
@@ -424,6 +422,7 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
                       }
                     />
                     {a.name} {a.detail && <small className="muted">{a.detail}</small>}
+                    {(a as { voice?: boolean }).voice ? <small className="warn-text"> · app de voz (vozes da call)</small> : null}
                   </label>
                 ))}
                 <button className="link" onClick={loadApps}>↻ atualizar lista</button>
@@ -599,6 +598,79 @@ function RecordPanel({ targets, onClose }: { targets: Target[]; onClose: () => v
           <button className="mini" onClick={() => window.native.recShow?.(r.lastClip!.path)}>mostrar na pasta</button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Tela transmitida: nome no topo, ações à direita, tela cheia com duplo clique ou ⛶. */
+function StreamTile({
+  stream,
+  userId,
+  mine,
+  recording,
+  many,
+  focused,
+  onFocus,
+  onMini,
+  children,
+}: {
+  stream: MediaStream;
+  userId: string;
+  mine: boolean;
+  recording: boolean;
+  many: boolean;
+  focused: boolean;
+  onFocus: () => void;
+  onMini?: () => void;
+  children?: React.ReactNode;
+}) {
+  const { ref, idle } = useIdle();
+  const { fs, toggle } = useTileFullscreen(`screen-${userId}`);
+  const name = app.user(userId)?.display_name ?? '?';
+  const vol = useApp((s) => s.profile?.settings?.user_volumes?.[userId]?.screen ?? 1);
+  const hasAudio = stream.getAudioTracks().length > 0;
+  const [size, setSize] = useState('');
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      const v = ref.current?.querySelector('video');
+      if (v?.videoWidth) setSize(`${v.videoHeight}p`);
+    }, 2000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div ref={ref} className={`screen-tile stream-tile ${idle ? 'idle' : ''} ${fs ? 'tile-fs' : ''}`} onDoubleClick={toggle}>
+      <Video stream={stream} muted />
+      <div className="tile-top">
+        <span className="live-badge">AO VIVO</span>
+        {recording && <span className="rec-badge">⏺ REC</span>}
+        <strong>
+          {name}
+          {mine && ' (você)'}
+        </strong>
+        {size && <small className="muted">{size}</small>}
+      </div>
+      <div className="tile-actions" onDoubleClick={(e) => e.stopPropagation()}>
+        {!mine && hasAudio && (
+          <label className="tile-vol" title={`Volume do som da transmissão: ${Math.round(vol * 100)}%`}>
+            🔊
+            <input type="range" min={0} max={2} step={0.05} value={vol} onChange={(e) => app.setUserVolume(userId, 'screen', Number(e.target.value))} />
+          </label>
+        )}
+        {many && (
+          <button className="tile-btn" title={focused ? 'Ver todas as telas' : 'Ver só esta tela'} onClick={onFocus}>
+            {focused ? '▦' : '👁'}
+          </button>
+        )}
+        {onMini && (
+          <button className="tile-btn" title="Miniatura sempre por cima dos outros apps" onClick={onMini}>
+            🗗
+          </button>
+        )}
+        <button className="tile-btn" title={fs ? 'Sair da tela cheia (Esc)' : 'Tela cheia (duplo clique; Esc sai)'} onClick={toggle}>
+          {fs ? '🗙' : '⛶'}
+        </button>
+      </div>
+      {children}
     </div>
   );
 }

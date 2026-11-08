@@ -78,6 +78,13 @@ function createWindow() {
     if (frameName === MINI_NAME) setupMini(child);
   });
   win.webContents.on('will-navigate', (e) => e.preventDefault());
+  // F11: tela cheia da janela inteira (como no navegador).
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.type === 'keyDown' && input.key === 'F11') {
+      e.preventDefault();
+      win.setFullScreen(!win.isFullScreen());
+    }
+  });
   win.on('closed', () => {
     win = null;
     for (const w of BrowserWindow.getAllWindows()) w.close(); // a miniatura vai junto
@@ -203,6 +210,52 @@ function setupIpc() {
   ipcMain.handle('store:saveOutbox', (_e, list) => store.saveOutbox(list));
   ipcMain.handle('store:dataDir', () => store.dir);
   ipcMain.handle('net:fetchUrl', (_e, url, kind) => fetchUrl(url, kind));
+  // ---- Spotify: login na página do próprio Spotify (o player embutido usa essa sessão) ----
+  const spotifyLogged = async () =>
+    (await session.defaultSession.cookies.get({ domain: 'spotify.com' })).some((c) => c.name === 'sp_dc');
+  ipcMain.handle('spotify:status', () => spotifyLogged());
+  ipcMain.handle('spotify:logout', async () => {
+    for (const c of await session.defaultSession.cookies.get({ domain: 'spotify.com' })) {
+      const url = `https://${c.domain.replace(/^\./, '')}${c.path}`;
+      await session.defaultSession.cookies.remove(url, c.name).catch(() => {});
+    }
+  });
+  ipcMain.handle('spotify:login', () =>
+    new Promise((resolve) => {
+      const w = new BrowserWindow({
+        parent: win ?? undefined,
+        width: 480,
+        height: 760,
+        title: 'Entrar no Spotify',
+        autoHideMenuBar: true,
+        icon: path.join(__dirname, 'icon.png'),
+        webPreferences: { sandbox: true, contextIsolation: true },
+      });
+      let done = false;
+      const finish = async () => {
+        if (done) return;
+        done = true;
+        const ok = await spotifyLogged();
+        if (!w.isDestroyed()) w.close();
+        resolve(ok);
+      };
+      // Depois do login o Spotify manda pro open.spotify.com: aí já tem a sessão.
+      w.webContents.on('did-navigate', async (_e, url) => {
+        if (/^https:\/\/open\.spotify\.com\//.test(url) && (await spotifyLogged())) finish();
+      });
+      w.webContents.setWindowOpenHandler(({ url }) => {
+        if (/^https:\/\/(accounts|www|open)\.spotify\.com\//.test(url)) w.loadURL(url);
+        return { action: 'deny' };
+      });
+      w.on('closed', () => {
+        if (!done) {
+          done = true;
+          spotifyLogged().then(resolve);
+        }
+      });
+      w.loadURL('https://accounts.spotify.com/login?continue=' + encodeURIComponent('https://open.spotify.com/'));
+    }),
+  );
   // ---- pasta compartilhada ----
   ipcMain.handle('share:pick', () => share.pickFolder(win));
   ipcMain.handle('share:list', (_e, root, rel) => share.list(root, rel));
@@ -237,10 +290,11 @@ function setupIpc() {
   // Áudio do PC na transmissão (Linux): fonte virtual do PipeWire sem o som do próprio app.
   const ownPids = () => [process.pid, ...app.getAppMetrics().map((m) => m.pid)];
   ipcMain.handle('share-audio:apps', () => linuxAudio.listApps(ownPids));
-  ipcMain.handle('share-audio:start', (_e, only) => linuxAudio.start(ownPids, only));
+  ipcMain.handle('share-audio:start', (_e, only, includeVoice) => linuxAudio.start(ownPids, only, includeVoice));
   ipcMain.handle('share-audio:stop', () => linuxAudio.stop());
   ipcMain.handle('app:info', () => ({ platform: process.platform, profile, version: app.getVersion() }));
   ipcMain.handle('app:idle', () => powerMonitor.getSystemIdleTime());
+  ipcMain.handle('app:fullscreen', (_e, on) => win?.setFullScreen(!!on));
   ipcMain.handle('app:focus', () => {
     if (!win) return;
     if (win.isMinimized()) win.restore();
