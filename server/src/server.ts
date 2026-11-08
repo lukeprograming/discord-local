@@ -109,7 +109,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     });
   });
   // Só depois do listen: o ws repassa erros do servidor (ex.: porta em uso) e, sem ouvinte, viram exceção não tratada.
-  const wss = new WebSocketServer({ server, path: '/gateway', maxPayload: 256 * 1024 });
+  const wss = new WebSocketServer({ server, path: '/gateway', maxPayload: 2 * 1024 * 1024 });
   wss.on('connection', (ws) => gateway.attach(ws));
   const url = `http://${opts.host}:${opts.port}`;
   console.log(`[server] ouvindo em ${url}  (banco: ${dbPath})`);

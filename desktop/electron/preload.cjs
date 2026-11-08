@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('native', {
   openDataDir: () => ipcRenderer.invoke('store:openDataDir'),
   info: () => ipcRenderer.invoke('app:info'),
   flash: () => ipcRenderer.invoke('app:flash'),
+  focusMain: () => ipcRenderer.invoke('app:focus'),
   onChooseScreen: (cb) => {
     const listener = (_e, sources) => cb(sources);
     ipcRenderer.on('screen:choose', listener);
@@ -18,7 +19,8 @@ contextBridge.exposeInMainWorld('native', {
   screenPicked: (id) => ipcRenderer.invoke('screen:picked', id),
   // Só no Linux (no Windows o áudio vem direto do getDisplayMedia).
   ...(process.platform === 'linux' && {
-    shareAudioStart: () => ipcRenderer.invoke('share-audio:start'),
+    shareAudioApps: () => ipcRenderer.invoke('share-audio:apps'),
+    shareAudioStart: (only) => ipcRenderer.invoke('share-audio:start', only),
     shareAudioStop: () => ipcRenderer.invoke('share-audio:stop'),
   }),
   interfaces: () => ipcRenderer.invoke('net:interfaces'),

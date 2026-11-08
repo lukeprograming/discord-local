@@ -5,8 +5,9 @@ import type {
   Message,
   ServerOps,
   UserPublic,
+  VoiceAttachment,
 } from '../../shared/protocol.ts';
-import { MAX_MESSAGE_LENGTH } from '../../shared/protocol.ts';
+import { MAX_MESSAGE_LENGTH, MAX_VOICE_BASE64, MAX_VOICE_MS, VOICE_PEAKS } from '../../shared/protocol.ts';
 import type { Db } from './db.ts';
 import { Calls } from './calls.ts';
 import { hashToken } from './auth.ts';
@@ -15,7 +16,7 @@ import { randomCode, ulid, ULID_RE } from './ids.ts';
 const HEARTBEAT_TIMEOUT_MS = 45_000;
 const HELLO_TIMEOUT_MS = 10_000;
 const RING_TIMEOUT_MS = 45_000;
-const MAX_FRAME_BYTES = 256 * 1024;
+const MAX_FRAME_BYTES = 2 * 1024 * 1024; // cabe uma mensagem de voz
 
 class ClientError extends Error {}
 
@@ -268,15 +269,16 @@ export class Gateway {
       if (typeof d.id !== 'string' || !ULID_RE.test(d.id)) throw new ClientError('id de mensagem inválido');
       const content = typeof d.content === 'string' ? d.content.trim() : '';
       if (!content || content.length > MAX_MESSAGE_LENGTH) throw new ClientError('mensagem vazia ou longa demais');
+      const attachment = d.attachment === undefined ? undefined : voiceAttachment(d.attachment);
 
       // Reenvio (ack anterior se perdeu): devolve o carimbo original sem duplicar.
       const prev = this.db.existingMessage(d.id);
       if (prev) {
         if (prev.sender_id !== conn.user.id) throw new ClientError('id de mensagem em uso');
-        return { message: { id: d.id, conversation_id: prev.conversation_id, sender_id: prev.sender_id, content, created_at: prev.created_at } };
+        return { message: { id: d.id, conversation_id: prev.conversation_id, sender_id: prev.sender_id, content, created_at: prev.created_at, ...(attachment && { attachment }) } };
       }
 
-      const message: Message = { id: d.id, conversation_id: conversationId, sender_id: conn.user.id, content, created_at: Date.now() };
+      const message: Message = { id: d.id, conversation_id: conversationId, sender_id: conn.user.id, content, created_at: Date.now(), ...(attachment && { attachment }) };
       const recipients = this.db.memberIds(conversationId).filter((u) => u !== conn.user.id);
       this.db.tx(() => this.db.storeMessage(message, recipients));
       for (const uid of recipients) this.sendToUser(uid, 'message.created', { message });
@@ -341,4 +343,18 @@ export class Gateway {
       }
     },
   };
+}
+
+/** Valida o anexo de voz e devolve só os campos conhecidos. */
+function voiceAttachment(a: unknown): VoiceAttachment {
+  const v = a as Partial<VoiceAttachment> | null;
+  const ok =
+    !!v &&
+    v.kind === 'voice' &&
+    typeof v.mime === 'string' && v.mime.startsWith('audio/') && v.mime.length <= 64 &&
+    typeof v.data === 'string' && v.data.length > 0 && v.data.length <= MAX_VOICE_BASE64 && /^[A-Za-z0-9+/]+=*$/.test(v.data) &&
+    typeof v.duration_ms === 'number' && v.duration_ms > 0 && v.duration_ms <= MAX_VOICE_MS + 5000 &&
+    Array.isArray(v.peaks) && v.peaks.length <= VOICE_PEAKS && v.peaks.every((x: unknown) => typeof x === 'number' && x >= 0 && x <= 1);
+  if (!ok) throw new ClientError('mensagem de voz inválida');
+  return { kind: 'voice', mime: v.mime!, data: v.data!, duration_ms: Math.round(v.duration_ms!), peaks: v.peaks! };
 }

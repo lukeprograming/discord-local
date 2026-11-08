@@ -3,6 +3,7 @@ import type { Conversation } from '../../../shared/protocol.ts';
 import { app, useApp } from '../app.ts';
 import { SCREEN_PRESETS, type ScreenPreset } from '../rtc.ts';
 import { Avatar } from './common.tsx';
+import { openMini } from '../mini.ts';
 
 export function CallPanel({ conversation }: { conversation: Conversation }) {
   const s = useApp((s) => s);
@@ -101,6 +102,11 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
                 {screens.length > 1 && (
                   <button className="mini" onClick={() => setFocused(focused ? null : p.connection_id)}>
                     {focused ? 'ver todas' : 'só esta'}
+                  </button>
+                )}
+                {s.platform !== 'android' && (
+                  <button className="mini" title="Janelinha sempre por cima dos outros apps" onClick={() => openMini(p.connection_id)}>
+                    miniatura
                   </button>
                 )}
                 <button className="mini" onClick={(e) => (e.currentTarget.closest('.screen-tile') as HTMLElement)?.requestFullscreen()}>
@@ -258,6 +264,29 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
   const [preset, setPreset] = useState<ScreenPreset>((profile?.settings?.screen_preset as ScreenPreset) ?? '1080p30');
   const [hint, setHint] = useState<'detail' | 'motion'>('detail');
   const [audio, setAudio] = useState(false);
+  // Linux: escolher de quais apps vai o som (vazio = o PC todo).
+  const [onlySome, setOnlySome] = useState(false);
+  const [apps, setApps] = useState<{ key: string; name: string; detail: string }[] | null>(null);
+  const [chosen, setChosen] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('share-audio-apps') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const canPick = platform === 'linux' && !!window.native.shareAudioApps;
+
+  function loadApps() {
+    window.native.shareAudioApps?.().then(setApps).catch(() => setApps([]));
+  }
+  useEffect(() => {
+    if (audio && onlySome && canPick && apps === null) loadApps();
+  }, [audio, onlySome]);
+
+  // Os escolhidos antes que não estão tocando agora continuam valendo (ex.: o jogo ainda vai abrir).
+  const listed = apps ?? [];
+  const extra = chosen.filter((k) => !listed.some((a) => a.key === k)).map((k) => ({ key: k, name: k, detail: 'não está tocando agora' }));
+  const audioApps = audio && onlySome && canPick ? chosen : undefined;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -286,17 +315,59 @@ function ShareOptions({ onClose }: { onClose: () => void }) {
             <small className="muted">
               {platform === 'win32'
                 ? '(use fone, senão os outros ouvem o próprio eco)'
-                : '(tudo que toca no PC, menos as vozes da call)'}
+                : '(sem as vozes da call)'}
             </small>
           </label>
+        )}
+        {audio && canPick && (
+          <div className="share-audio-apps">
+            <label className="check">
+              <input type="radio" checked={!onlySome} onChange={() => setOnlySome(false)} />
+              Tudo que toca no PC
+            </label>
+            <label className="check">
+              <input type="radio" checked={onlySome} onChange={() => setOnlySome(true)} />
+              Só os apps que eu escolher
+            </label>
+            {onlySome && (
+              <div className="app-list">
+                {apps === null && <small className="muted">Procurando apps…</small>}
+                {apps !== null && !listed.length && !extra.length && (
+                  <small className="muted">Nenhum app tocando som agora. Dê play em algo e atualize.</small>
+                )}
+                {[...listed, ...extra].map((a) => (
+                  <label key={a.key} className="check">
+                    <input
+                      type="checkbox"
+                      checked={chosen.includes(a.key)}
+                      onChange={(e) =>
+                        setChosen((c) => (e.target.checked ? [...c, a.key] : c.filter((k) => k !== a.key)))
+                      }
+                    />
+                    {a.name} {a.detail && <small className="muted">{a.detail}</small>}
+                  </label>
+                ))}
+                <button className="link" onClick={loadApps}>↻ atualizar lista</button>
+              </div>
+            )}
+          </div>
         )}
         <div className="modal-actions">
           <button onClick={onClose}>Cancelar</button>
           <button
             className="primary"
+            disabled={!!audioApps && !audioApps.length}
+            title={audioApps && !audioApps.length ? 'Escolha pelo menos um app' : undefined}
             onClick={() => {
+              if (audioApps) {
+                try {
+                  localStorage.setItem('share-audio-apps', JSON.stringify(audioApps));
+                } catch {
+                  /* sem storage */
+                }
+              }
               onClose();
-              app.startScreen(preset, audio, hint);
+              app.startScreen(preset, audio, hint, audioApps);
             }}
           >
             Escolher tela

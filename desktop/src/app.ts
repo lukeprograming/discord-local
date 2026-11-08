@@ -6,6 +6,7 @@ import type {
   Message,
   Presence,
   UserPublic,
+  VoiceAttachment,
 } from '../../shared/protocol.ts';
 import { MAX_MESSAGE_LENGTH } from '../../shared/protocol.ts';
 import { GatewayClient, httpPost } from './gateway.ts';
@@ -481,6 +482,18 @@ class App {
     this.flushOutbox();
   }
 
+  async sendVoice(conversationId: string, attachment: VoiceAttachment): Promise<void> {
+    const me = this.me();
+    if (!me) return;
+    const secs = Math.round(attachment.duration_ms / 1000);
+    const content = `🎤 Mensagem de voz (${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')})`;
+    const msg: Message = { id: ulid(), conversation_id: conversationId, sender_id: me.id, content, created_at: Date.now(), attachment };
+    const outbox = [...this.state.outbox, msg];
+    this.set({ outbox });
+    await window.native.saveOutbox(outbox);
+    this.flushOutbox();
+  }
+
   /** Envia a fila em ordem. Para no primeiro erro de rede; tenta de novo ao reconectar. */
   private async flushOutbox(): Promise<void> {
     if (this.flushing || !this.gw) return;
@@ -493,6 +506,7 @@ class App {
             id: msg.id,
             conversation_id: msg.conversation_id,
             content: msg.content,
+            ...(msg.attachment && { attachment: msg.attachment }),
           });
           await window.native.appendMessages(message.conversation_id, [message]);
           this.addToState(message);
@@ -681,11 +695,11 @@ class App {
     this.bump();
   }
 
-  async startScreen(preset: ScreenPreset, withAudio: boolean, hint: 'detail' | 'motion'): Promise<void> {
+  async startScreen(preset: ScreenPreset, withAudio: boolean, hint: 'detail' | 'motion', audioApps?: string[]): Promise<void> {
     const s = this.state.call;
     if (!s) return;
     try {
-      await s.startScreen(preset, withAudio, hint);
+      await s.startScreen(preset, withAudio, hint, audioApps);
       this.saveSettings({ screen_preset: preset });
     } catch (e) {
       if ((e as Error).name !== 'NotAllowedError') this.toast(`Não consegui capturar a tela: ${(e as Error).message}`);

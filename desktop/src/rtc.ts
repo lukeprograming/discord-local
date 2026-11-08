@@ -227,7 +227,8 @@ export class CallSession {
     this.setMuted(this.muted);
   }
 
-  async startScreen(preset: ScreenPreset, withAudio: boolean, hint: 'detail' | 'motion'): Promise<void> {
+  /** `audioApps` (só Linux): transmitir o som só desses apps; vazio/ausente = o PC todo. */
+  async startScreen(preset: ScreenPreset, withAudio: boolean, hint: 'detail' | 'motion', audioApps?: string[]): Promise<void> {
     const cfg = SCREEN_PRESETS[preset];
     // No Linux o áudio vem de uma fonte virtual do PipeWire (o loopback do Chromium só existe no Windows).
     const linuxAudio = withAudio && !!window.native?.shareAudioStart;
@@ -237,7 +238,7 @@ export class CallSession {
     });
     if (linuxAudio) {
       try {
-        stream.addTrack(await captureLinuxSystemAudio());
+        stream.addTrack(await captureLinuxSystemAudio(audioApps));
       } catch (e) {
         for (const t of stream.getTracks()) t.stop();
         window.native.shareAudioStop?.();
@@ -566,8 +567,8 @@ function preferCodec(tr: RTCRtpTransceiver, mime: string): void {
 }
 
 /** Linux: cria a fonte virtual (no processo principal) e abre ela como se fosse um microfone. */
-async function captureLinuxSystemAudio(): Promise<MediaStreamTrack> {
-  const label = await window.native.shareAudioStart!();
+async function captureLinuxSystemAudio(only?: string[]): Promise<MediaStreamTrack> {
+  const label = await window.native.shareAudioStart!(only?.length ? only : null);
   // O Chromium leva um instante para enxergar o dispositivo novo.
   for (let i = 0; i < 20; i++) {
     const dev = (await navigator.mediaDevices.enumerateDevices()).find((d) => d.kind === 'audioinput' && d.label === label);

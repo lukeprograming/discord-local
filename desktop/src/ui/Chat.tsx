@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Conversation, Message } from '../../../shared/protocol.ts';
 import { app, useApp } from '../app.ts';
 import { Avatar, formatTime } from './common.tsx';
+import { VoiceMessage, VoiceRecorder } from './Voice.tsx';
 
 const GROUP_WINDOW_MS = 5 * 60_000;
 const URL_RE = /(https?:\/\/[^\s<]+)/g;
@@ -9,6 +10,7 @@ const URL_RE = /(https?:\/\/[^\s<]+)/g;
 export function Chat({ conversation }: { conversation: Conversation }) {
   const s = useApp((s) => s);
   const [text, setText] = useState('');
+  const [recording, setRecording] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -104,7 +106,7 @@ export function Chat({ conversation }: { conversation: Conversation }) {
                     </div>
                   )}
                   <div className="msg-text">
-                    <Linkify text={m.content} />
+                    {m.attachment?.kind === 'voice' ? <VoiceMessage attachment={m.attachment} /> : <Linkify text={m.content} />}
                     {m.pending && <small className="muted" title="Será enviada quando conectar"> ⏳</small>}
                   </div>
                 </div>
@@ -116,6 +118,7 @@ export function Chat({ conversation }: { conversation: Conversation }) {
 
       <div className="composer">
         <div className="composer-row">
+        {!recording && (
         <textarea
           ref={inputRef}
           rows={1}
@@ -127,10 +130,13 @@ export function Chat({ conversation }: { conversation: Conversation }) {
           }}
           onKeyDown={onKeyDown}
         />
-        {mobile && (
-          <button className="send-btn" title="Enviar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()} onClick={submit}>
+        )}
+        {mobile && text.trim() ? (
+          <button className="send-btn" title="Enviar" onMouseDown={(e) => e.preventDefault()} onClick={submit}>
             ➤
           </button>
+        ) : (
+          !text.trim() && <VoiceRecorder conversationId={conversation.id} onRecording={setRecording} />
         )}
         </div>
         <div className="typing">

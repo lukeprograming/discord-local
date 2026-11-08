@@ -10,14 +10,17 @@
 
 const { execFile, execFileSync } = require('node:child_process');
 
-const NODE_NAME = 'discord_local_share';
-const DESCRIPTION = 'Discord Local (áudio da transmissão)';
+// Um por processo: dois apps abertos (ou um teste) não mexem na fonte um do outro.
+const NODE_PREFIX = 'discord_local_share';
+const NODE_NAME = `${NODE_PREFIX}_${process.pid}`;
+const DESCRIPTION = `Discord Local (áudio da transmissão ${process.pid})`;
 const POLL_MS = 1000;
 
 let moduleId = null;
 let timer = null;
 let syncing = false;
 let ownPids = () => [process.pid];
+let onlyApps = null; // null = todos os apps; senão, só as chaves escolhidas (ver appKey)
 
 function run(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -28,15 +31,69 @@ function run(cmd, args) {
   });
 }
 
-/** Restos de uma execução anterior que fechou sem limpar (crash, kill). */
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+}
+
+/** Restos de execuções que fecharam sem limpar (crash, kill) — só de processos que já morreram. */
 async function unloadStale() {
   const out = await run('pactl', ['list', 'short', 'modules']).catch(() => '');
   for (const line of out.split('\n')) {
     const [id, name, args = ''] = line.split('\t');
-    if (name === 'module-null-sink' && args.includes(`sink_name=${NODE_NAME}`)) {
-      await run('pactl', ['unload-module', id]).catch(() => {});
-    }
+    if (name !== 'module-null-sink') continue;
+    const m = new RegExp(`sink_name=${NODE_PREFIX}(?:_(\\d+))?(?:\\s|$)`).exec(args);
+    if (!m) continue;
+    const pid = Number(m[1]);
+    if (pid === process.pid || (pid && alive(pid))) continue;
+    // Sem PID (v0.2.7): só remove se ninguém está gravando dela.
+    if (!pid && (await inUse(`${NODE_PREFIX}`))) continue;
+    await run('pactl', ['unload-module', id]).catch(() => {});
   }
+}
+
+async function inUse(sourceName) {
+  const out = await run('pactl', ['list', 'source-outputs']).catch(() => '');
+  return out.includes(`target.object = "${sourceName}"`);
+}
+
+/** Identifica o app pelo executável (os streams vêm e vão, o PID do navegador muda). */
+function appKey(props) {
+  return String(props['application.process.binary'] || props['application.name'] || props['node.name'] || '?');
+}
+
+async function playbackStreams(mine) {
+  const objs = JSON.parse(await run('pw-dump', []));
+  const props = (o) => o.info?.props ?? {};
+  return {
+    objs,
+    streams: objs.filter(
+      (o) =>
+        o.type === 'PipeWire:Interface:Node' &&
+        props(o)['media.class'] === 'Stream/Output/Audio' &&
+        !mine.has(Number(props(o)['application.process.id'])),
+    ),
+  };
+}
+
+/** Apps tocando som agora (menos o próprio), para escolher o que vai na transmissão. */
+async function listApps(getOwnPids) {
+  if (process.platform !== 'linux') return [];
+  const mine = new Set((getOwnPids ?? ownPids)().map(Number));
+  const { streams } = await playbackStreams(mine);
+  const apps = new Map();
+  for (const n of streams) {
+    const p = n.info?.props ?? {};
+    const key = appKey(p);
+    const name = String(p['application.name'] || key);
+    const app = apps.get(key) ?? { key, name, detail: key !== name ? key : '' };
+    apps.set(key, app);
+  }
+  return [...apps.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function channelTargets(channel, inputs) {
@@ -50,7 +107,8 @@ async function sync() {
   if (syncing || moduleId === null) return;
   syncing = true;
   try {
-    const objs = JSON.parse(await run('pw-dump', []));
+    const mine = new Set(ownPids().map(Number));
+    const { objs, streams } = await playbackStreams(mine);
     const props = (o) => o.info?.props ?? {};
     const nodes = objs.filter((o) => o.type === 'PipeWire:Interface:Node');
     const ports = objs.filter((o) => o.type === 'PipeWire:Interface:Port');
@@ -66,12 +124,8 @@ async function sync() {
     const inputIds = new Set(Object.values(inputs));
     if (!inputIds.size) return;
 
-    const mine = new Set(ownPids().map(Number));
     const streamIds = new Set(
-      nodes
-        .filter((n) => props(n)['media.class'] === 'Stream/Output/Audio')
-        .filter((n) => !mine.has(Number(props(n)['application.process.id'])))
-        .map((n) => n.id),
+      streams.filter((n) => !onlyApps || onlyApps.has(appKey(props(n)))).map((n) => n.id),
     );
 
     const want = new Set();
@@ -103,10 +157,11 @@ async function sync() {
 }
 
 /** Cria a fonte virtual e começa a ligar os apps nela. Devolve o nome que aparece no getUserMedia. */
-async function start(getOwnPids) {
+async function start(getOwnPids, only) {
   if (process.platform !== 'linux') throw new Error('Só no Linux');
   if (getOwnPids) ownPids = getOwnPids;
   await stop();
+  onlyApps = Array.isArray(only) && only.length ? new Set(only.map(String)) : null;
   await unloadStale();
   try {
     await run('pw-dump', ['--version']);
@@ -147,4 +202,4 @@ function stopSync() {
   moduleId = null;
 }
 
-module.exports = { start, stop, stopSync, DESCRIPTION };
+module.exports = { start, stop, stopSync, listApps, DESCRIPTION };

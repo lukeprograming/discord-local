@@ -58,12 +58,87 @@ function createWindow() {
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
 
   // Links clicados no chat abrem no navegador, nunca dentro do app.
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    // Miniatura da transmissão (src/mini.ts): about:blank que o renderer preenche.
+    if (frameName === MINI_NAME && (url === 'about:blank' || url === '')) {
+      return { action: 'allow', overrideBrowserWindowOptions: miniWindowOptions() };
+    }
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
+  win.webContents.on('did-create-window', (child, { frameName }) => {
+    if (frameName === MINI_NAME) setupMini(child);
+  });
   win.webContents.on('will-navigate', (e) => e.preventDefault());
-  win.on('closed', () => (win = null));
+  win.on('closed', () => {
+    win = null;
+    for (const w of BrowserWindow.getAllWindows()) w.close(); // a miniatura vai junto
+  });
+}
+
+// ---- miniatura da transmissão (sempre por cima) ----
+
+const MINI_NAME = 'dl-mini';
+const MINI_TITLE = 'Discord Local — mini';
+
+function miniWindowOptions() {
+  return {
+    width: 480,
+    height: 270,
+    minWidth: 200,
+    minHeight: 113,
+    frame: false,
+    alwaysOnTop: true,
+    backgroundColor: '#000000',
+    title: MINI_TITLE,
+    autoHideMenuBar: true,
+    webPreferences: { backgroundThrottling: false },
+  };
+}
+
+function setupMini(child) {
+  child.setAlwaysOnTop(true, 'screen-saver');
+  child.setVisibleOnAllWorkspaces(true);
+  child.on('page-title-updated', (e) => e.preventDefault());
+  child.webContents.on('will-navigate', (e) => e.preventDefault());
+  child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // No Wayland o compositor ignora o "sempre no topo" pedido pelo app; no KDE dá pra
+  // pedir direto ao KWin com um script.
+  if (process.platform === 'linux') setTimeout(() => kwinKeepAbove(MINI_TITLE), 400);
+}
+
+function kwinKeepAbove(title) {
+  if (!/KDE/i.test(process.env.XDG_CURRENT_DESKTOP || '')) return;
+  const { execFile } = require('node:child_process');
+  const name = 'discord-local-mini';
+  const file = path.join(app.getPath('temp'), 'discord-local-mini-kwin.js');
+  try {
+    fs.writeFileSync(
+      file,
+      `for (const w of workspace.windowList()) {\n` +
+        `  if (w.caption.startsWith(${JSON.stringify(title)})) { w.keepAbove = true; w.onAllDesktops = true; }\n` +
+        `}\n`,
+    );
+  } catch {
+    return;
+  }
+  const call = (objPath, method, ...args) =>
+    new Promise((resolve) =>
+      execFile(
+        'dbus-send',
+        ['--session', '--print-reply', '--dest=org.kde.KWin', objPath, method, ...args],
+        { timeout: 3000 },
+        (err, out) => resolve(err ? '' : out),
+      ),
+    );
+  (async () => {
+    await call('/Scripting', 'org.kde.kwin.Scripting.unloadScript', `string:${name}`);
+    const out = await call('/Scripting', 'org.kde.kwin.Scripting.loadScript', `string:${file}`, `string:${name}`);
+    const id = /int32 (-?\d+)/.exec(out)?.[1];
+    if (!id || id === '-1') return;
+    await call(`/Scripting/Script${id}`, 'org.kde.kwin.Script.run');
+    setTimeout(() => call('/Scripting', 'org.kde.kwin.Scripting.unloadScript', `string:${name}`), 1000);
+  })();
 }
 
 function setupMedia() {
@@ -113,11 +188,17 @@ function setupIpc() {
   ipcMain.handle('store:openDataDir', () => shell.openPath(store.dir));
   ipcMain.handle('screen:picked', (_e, id) => pendingPick?.(id));
   // Áudio do PC na transmissão (Linux): fonte virtual do PipeWire sem o som do próprio app.
-  ipcMain.handle('share-audio:start', () =>
-    linuxAudio.start(() => [process.pid, ...app.getAppMetrics().map((m) => m.pid)]),
-  );
+  const ownPids = () => [process.pid, ...app.getAppMetrics().map((m) => m.pid)];
+  ipcMain.handle('share-audio:apps', () => linuxAudio.listApps(ownPids));
+  ipcMain.handle('share-audio:start', (_e, only) => linuxAudio.start(ownPids, only));
   ipcMain.handle('share-audio:stop', () => linuxAudio.stop());
   ipcMain.handle('app:info', () => ({ platform: process.platform, profile, version: app.getVersion() }));
+  ipcMain.handle('app:focus', () => {
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
   ipcMain.handle('app:flash', () => {
     if (win && !win.isFocused()) win.flashFrame(true);
   });

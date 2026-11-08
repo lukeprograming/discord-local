@@ -251,3 +251,21 @@ button.link.back { display: block; margin: 14px auto 0; }
 .meter-level.open { background: var(--green); }
 .meter.auto .meter-level { background: var(--accent); }
 .meter-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--yellow); }
+
+/* ---- mensagens de voz ---- */
+.voice-btn { flex-shrink: 0; }
+.voice-recording { flex: 1; display: flex; align-items: center; gap: 10px; background: var(--bg-3); border-radius: var(--radius); padding: 6px 8px 6px 4px; min-height: 44px; }
+.voice-recording .muted { flex: 1; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #f23f43; transition: transform .1s; flex-shrink: 0; }
+.rec-time { font-variant-numeric: tabular-nums; font-weight: 600; }
+.voice-msg { display: inline-flex; align-items: center; gap: 10px; background: var(--bg-3); border-radius: 18px; padding: 6px 12px 6px 6px; max-width: 100%; white-space: normal; }
+.voice-play { width: 32px; height: 32px; border-radius: 50%; padding: 0; background: var(--accent); color: white; font-size: 13px; flex-shrink: 0; }
+.voice-wave { display: flex; align-items: center; gap: 2px; height: 28px; width: 180px; cursor: pointer; }
+.voice-wave span { flex: 1; min-width: 2px; border-radius: 2px; background: var(--muted); opacity: .45; }
+.voice-wave span.played { background: var(--accent); opacity: 1; }
+.voice-time { font-variant-numeric: tabular-nums; min-width: 32px; }
+.voice-speed { background: none; padding: 2px 6px; font-size: 12px; color: var(--muted); border: 1px solid var(--bg-0); border-radius: 10px; }
+@media (max-width: 700px) { .voice-wave { width: 120px; } }
+
+.share-audio-apps { margin: 2px 0 0 26px; display: flex; flex-direction: column; gap: 2px; }
+.share-audio-apps .app-list { margin-left: 26px; display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; align-items: flex-start; }

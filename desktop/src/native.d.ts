@@ -63,10 +63,13 @@ declare global {
       openDataDir(): Promise<void>;
       info(): Promise<{ platform: string; profile: string; version: string }>;
       flash(): Promise<void>;
+      focusMain?(): Promise<void>;
       onChooseScreen(cb: (sources: ScreenSource[]) => void): () => void;
       screenPicked(id: string | null): Promise<void>;
       /** Linux: cria a fonte virtual com o áudio do PC (sem o próprio app). Devolve o nome do dispositivo. */
-      shareAudioStart?(): Promise<string>;
+      shareAudioStart?(only?: string[] | null): Promise<string>;
+      /** Linux: apps tocando som agora (para escolher só alguns na transmissão). */
+      shareAudioApps?(): Promise<{ key: string; name: string; detail: string }[]>;
       shareAudioStop?(): Promise<void>;
       interfaces(): Promise<NetInterface[]>;
       hostStart(cfg: HostConfig): Promise<HostStatus>;

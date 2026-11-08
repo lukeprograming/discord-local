@@ -26,12 +26,22 @@ export type Conversation = {
   members: UserPublic[];
 };
 
+/** Mensagem de voz gravada no app (vai inteira dentro da mensagem). */
+export type VoiceAttachment = {
+  kind: 'voice';
+  mime: string; // ex.: audio/webm;codecs=opus
+  data: string; // base64
+  duration_ms: number;
+  peaks: number[]; // forma de onda resumida (0..1)
+};
+
 export type Message = {
   id: string; // ULID gerado pelo cliente (idempotência do reenvio)
   conversation_id: string;
   sender_id: string;
-  content: string;
+  content: string; // nas de voz: texto de reserva para versões antigas e notificações
   created_at: number; // ms epoch, carimbado pelo servidor ao receber
+  attachment?: VoiceAttachment;
 };
 
 export type CallParticipant = {
@@ -81,7 +91,7 @@ export type ClientOps = {
   'friend.accept': { user_id: string };
   'friend.remove': { user_id: string };
   'group.create': { name: string; member_ids: string[] };
-  'message.send': { id: string; conversation_id: string; content: string };
+  'message.send': { id: string; conversation_id: string; content: string; attachment?: VoiceAttachment };
   'mailbox.ack': { ids: string[] };
   typing: { conversation_id: string };
   'call.join': { conversation_id: string };
@@ -121,3 +131,7 @@ export type Envelope<Ops, K extends keyof Ops = keyof Ops> = {
 };
 
 export const MAX_MESSAGE_LENGTH = 4000;
+export const MAX_VOICE_MS = 3 * 60_000;
+/** Tamanho máximo do áudio em base64 (~3 min de Opus a 24 kbps cabem com folga). */
+export const MAX_VOICE_BASE64 = 1_200_000;
+export const VOICE_PEAKS = 48;
