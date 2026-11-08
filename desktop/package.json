@@ -1,7 +1,7 @@
 {
   "name": "discord-local",
   "productName": "Discord Local",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Chat, call e transmissão de tela privados",
   "author": "Lukeprograming",
   "private": true,

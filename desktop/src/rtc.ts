@@ -343,15 +343,22 @@ export class CallSession {
   }
 
   async startCamera(deviceId?: string): Promise<void> {
+    // Celular: não força 16:9 deitado (o Android recortaria a imagem com o aparelho em pé).
+    // Pede só o tamanho máximo e deixa a câmera mandar no formato dela, sem recorte.
+    const phone = /Android|iPhone|iPad/i.test(navigator.userAgent);
+    const size: MediaTrackConstraints = phone
+      ? { width: { max: CAMERA.width }, height: { max: CAMERA.width }, resizeMode: { ideal: 'none' } } as MediaTrackConstraints
+      : { width: { ideal: CAMERA.width }, height: { ideal: CAMERA.height } };
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         deviceId: deviceId ? { ideal: deviceId } : undefined,
         facingMode: deviceId ? undefined : 'user',
-        width: { ideal: CAMERA.width },
-        height: { ideal: CAMERA.height },
+        ...size,
         frameRate: { ideal: CAMERA.fps, max: CAMERA.fps },
       },
     });
+    // "Afastamento de leve": se a câmera deixa controlar o zoom, usa o menor (mais aberto).
+    await zoomOut(stream.getVideoTracks()[0]);
     if (this.closed) {
       for (const t of stream.getTracks()) t.stop();
       return;
@@ -655,4 +662,13 @@ async function captureLinuxSystemAudio(only?: string[], includeVoiceApps = false
     await new Promise((r) => setTimeout(r, 150));
   }
   throw new Error('a fonte de áudio virtual não apareceu');
+}
+
+/** Zoom mínimo, quando o aparelho deixa controlar (a maioria dos celulares Android). */
+async function zoomOut(track: MediaStreamTrack | undefined): Promise<void> {
+  if (!track?.getCapabilities) return;
+  const caps = track.getCapabilities() as MediaTrackCapabilities & { zoom?: { min: number; max: number } };
+  const current = (track.getSettings() as MediaTrackSettings & { zoom?: number }).zoom;
+  if (!caps.zoom || current === undefined || current <= caps.zoom.min) return;
+  await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min } as MediaTrackConstraintSet] }).catch(() => {});
 }

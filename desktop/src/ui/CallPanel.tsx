@@ -136,13 +136,7 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
               onClick={me ? undefined : () => setVolumeFor(volumeFor === p.connection_id ? null : p.connection_id)}
             >
               {cam ? (
-                <div
-                  className={`cam-tile ${speaking ? 'speaking' : ''} ${me ? 'mirror' : ''}`}
-                  title="Clique duas vezes para tela cheia"
-                  onDoubleClick={(e) => (e.currentTarget as HTMLElement).requestFullscreen()}
-                >
-                  <Video stream={cam} muted />
-                </div>
+                <CamTile stream={cam} speaking={!!speaking} mirror={me} id={`cam-${p.connection_id}`} />
               ) : (
                 <Avatar user={app.user(p.user_id)} size={48} speaking={speaking} />
               )}
@@ -671,6 +665,45 @@ function StreamTile({
         </button>
       </div>
       {children}
+    </div>
+  );
+}
+
+/** Câmera: o quadro segue o formato do vídeo (em pé ou deitado) e mostra a imagem inteira. */
+function CamTile({ stream, speaking, mirror, id }: { stream: MediaStream; speaking: boolean; mirror: boolean; id: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const { fs, toggle } = useTileFullscreen(id);
+  const [aspect, setAspect] = useState(16 / 9);
+  useEffect(() => {
+    const v = ref.current?.querySelector('video');
+    if (!v) return;
+    const update = () => v.videoWidth && v.videoHeight && setAspect(v.videoWidth / v.videoHeight);
+    v.addEventListener('loadedmetadata', update);
+    v.addEventListener('resize', update); // celular girou
+    update();
+    return () => {
+      v.removeEventListener('loadedmetadata', update);
+      v.removeEventListener('resize', update);
+    };
+  }, [stream]);
+  const portrait = aspect < 1;
+  return (
+    <div
+      ref={ref}
+      className={`cam-tile ${portrait ? 'portrait' : ''} ${speaking ? 'speaking' : ''} ${mirror ? 'mirror' : ''} ${fs ? 'cam-fs' : ''}`}
+      style={{ aspectRatio: String(aspect) }}
+      title="Clique duas vezes para tela cheia"
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        toggle();
+      }}
+    >
+      <Video stream={stream} muted />
+      {fs && (
+        <button className="tile-btn cam-fs-close" title="Sair da tela cheia (Esc)" onClick={toggle}>
+          🗙
+        </button>
+      )}
     </div>
   );
 }
