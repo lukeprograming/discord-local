@@ -21,6 +21,7 @@ import { Settings } from './Settings.tsx';
 import { FavoriteMessages, Search } from './Search.tsx';
 import { UpdateBanner } from './Update.tsx';
 import { CallDock } from './CallDock.tsx';
+import { NotificationBell } from './Notifications.tsx';
 
 type SectionId = 'favs' | 'rooms' | 'dms' | 'groups';
 
@@ -203,6 +204,7 @@ export function Sidebar() {
           </div>
           <ChevronDown size={16} className="muted" />
         </button>
+        {!s.frameless && <NotificationBell className="side-bell" />}
         <button className="icon" title="Configurações" aria-label="Configurações" onClick={() => setSettings(true)}>
           <SettingsIcon size={18} />
         </button>

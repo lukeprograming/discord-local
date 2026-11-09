@@ -53,8 +53,26 @@ let turnStarted = null;
 let pendingPick = null; // callback do setDisplayMediaRequestHandler aguardando o seletor
 let quitting = false; // saída já em andamento (não segurar no before-quit)
 
+// Barra de título própria (0.9.3): janela sem moldura no Windows/Linux. Quem preferir a do
+// sistema marca nas Configurações (vale ao abrir de novo) — fica em ui.json.
+function uiPrefsPath() {
+  return path.join(app.getPath('userData'), 'ui.json');
+}
+function readUiPrefs() {
+  try {
+    return JSON.parse(fs.readFileSync(uiPrefsPath(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+const frameless = () => process.platform !== 'darwin' && !readUiPrefs().nativeFrame;
+let windowFrameless = false; // como a janela atual foi criada (a preferência só vale na próxima)
+
 function createWindow() {
+  const noFrame = frameless();
+  windowFrameless = noFrame;
   win = new BrowserWindow({
+    frame: !noFrame,
     width: 1280,
     height: 820,
     minWidth: 900,
@@ -74,6 +92,9 @@ function createWindow() {
       : {}),
   });
   if (testBounds) win.once('ready-to-show', () => win.showInactive());
+  const sendMax = () => win?.webContents.send('win:maximized', win.isMaximized());
+  win.on('maximize', sendMax);
+  win.on('unmaximize', sendMax);
 
   if (process.env.VITE_DEV_SERVER_URL) win.loadURL(process.env.VITE_DEV_SERVER_URL);
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
@@ -315,6 +336,13 @@ function setupIpc() {
   ipcMain.handle('app:info', () => ({ platform: process.platform, profile, version: app.getVersion() }));
   ipcMain.handle('app:idle', () => powerMonitor.getSystemIdleTime());
   ipcMain.handle('app:fullscreen', (_e, on) => win?.setFullScreen(!!on));
+  ipcMain.handle('win:state', () => ({ frameless: windowFrameless, maximized: !!win?.isMaximized() }));
+  ipcMain.handle('win:minimize', () => win?.minimize());
+  ipcMain.handle('win:toggleMaximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()));
+  ipcMain.handle('win:close', () => win?.close());
+  ipcMain.handle('win:setNativeFrame', (_e, on) => {
+    fs.writeFileSync(uiPrefsPath(), JSON.stringify({ ...readUiPrefs(), nativeFrame: !!on }, null, 2));
+  });
   ipcMain.handle('app:focus', () => {
     if (!win) return;
     if (win.isMinimized()) win.restore();

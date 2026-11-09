@@ -136,6 +136,14 @@ declare global {
       /** Janela inteira em tela cheia (tile em tela cheia / F11). */
       setFullscreen?(on: boolean): Promise<void>;
       focusMain?(): Promise<void>;
+      /** Barra de título própria (só no desktop). */
+      winState?(): Promise<{ frameless: boolean; maximized: boolean }>;
+      winMinimize?(): Promise<void>;
+      winToggleMaximize?(): Promise<void>;
+      winClose?(): Promise<void>;
+      /** Usar a barra do sistema (vale ao abrir o app de novo). */
+      winSetNativeFrame?(on: boolean): Promise<void>;
+      onWinMaximized?(cb: (maximized: boolean) => void): () => void;
       onChooseScreen(cb: (sources: ScreenSource[]) => void): () => void;
       screenPicked(id: string | null): Promise<void>;
       /** Linux: cria a fonte virtual com o áudio do PC (sem o próprio app). Devolve o nome do dispositivo. */

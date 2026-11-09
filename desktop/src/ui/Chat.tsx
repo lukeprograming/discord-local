@@ -15,7 +15,7 @@ import { parseMedia, parseYouTube, queuePlaylist, queueYouTube } from '../youtub
 const GROUP_WINDOW_MS = 5 * 60_000;
 const URL_RE = /(https?:\/\/[^\s<]+)/g;
 
-export function Chat({ conversation }: { conversation: Conversation }) {
+export function Chat({ conversation, hidden = false }: { conversation: Conversation; hidden?: boolean }) {
   const s = useApp((s) => s);
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
@@ -85,6 +85,14 @@ export function Chat({ conversation }: { conversation: Conversation }) {
     setMenuFor(null);
     setPickerFor(null);
   }, [conversation.id]);
+
+  // Aba voltou a aparecer: foco na caixa e, se estava no fim, continua no fim.
+  useLayoutEffect(() => {
+    if (hidden) return;
+    const el = listRef.current;
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
+    if (!mobile) inputRef.current?.focus();
+  }, [hidden]);
 
   // Veio da busca: rola até a mensagem e pisca.
   useEffect(() => {
@@ -178,6 +186,7 @@ export function Chat({ conversation }: { conversation: Conversation }) {
   return (
     <section
       className={`chat ${dragging ? 'dragging' : ''}`}
+      hidden={hidden}
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes('Files')) return;
         e.preventDefault();

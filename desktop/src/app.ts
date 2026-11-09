@@ -105,7 +105,25 @@ export type State = {
   /** Tela do centro quando nenhuma conversa está aberta (null = só a lista, no celular). */
   page: Page | null;
   friendsTab: FriendsTab;
+  /** Conversas abertas em abas (min = recolhida: some da barra, mas continua montada). */
+  tabs: Tab[];
+  /** Janela sem moldura (barra de título nossa) e se está maximizada. */
+  frameless: boolean;
+  maximized: boolean;
+  version: string;
 };
+
+export type Tab = { id: string; min: boolean };
+const MAX_TABS = 8;
+
+function loadTabs(): Tab[] {
+  try {
+    const v = JSON.parse(localStorage.getItem('tabs') || '[]');
+    return Array.isArray(v) ? v.filter((t) => typeof t?.id === 'string').slice(0, MAX_TABS) : [];
+  } catch {
+    return [];
+  }
+}
 
 export type Page = 'home' | 'friends' | 'downloads';
 export type FriendsTab = 'online' | 'all' | 'requests' | 'add';
@@ -162,6 +180,10 @@ class App {
     panelTab: 'people',
     page: null,
     friendsTab: 'online',
+    tabs: loadTabs(),
+    frameless: false,
+    maximized: false,
+    version: '',
   };
 
   private listeners = new Set<Listener>();
@@ -416,6 +438,8 @@ class App {
       window.native.updateStatus(),
     ]);
     window.native.onUpdateStatus((u) => this.set({ update: u }));
+    window.native.winState?.().then((w) => this.set({ frameless: w.frameless, maximized: w.maximized })).catch(() => {});
+    window.native.onWinMaximized?.((maximized) => this.set({ maximized }));
     this.watchIdle();
     this.watchBackground();
     const profile = stored && { ...stored, role: stored.role ?? 'client' };
@@ -425,6 +449,7 @@ class App {
       profile,
       outbox,
       platform: info.platform,
+      version: info.version,
       embedded,
       host,
       update,
@@ -658,6 +683,60 @@ class App {
     this.set({ stage });
   }
 
+  // ---- abas ----
+
+  /** Abrir uma conversa abre/mostra a aba dela; passando do limite sai a mais antiga. */
+  private withTab(id: string): Tab[] {
+    let tabs = this.state.tabs.some((t) => t.id === id)
+      ? this.state.tabs.map((t) => (t.id === id ? { ...t, min: false } : t))
+      : [...this.state.tabs, { id, min: false }];
+    while (tabs.length > MAX_TABS) {
+      const drop = tabs.find((t) => t.min && t.id !== id) ?? tabs.find((t) => t.id !== id)!;
+      tabs = tabs.filter((t) => t !== drop);
+    }
+    this.saveTabs(tabs);
+    return tabs;
+  }
+
+  private saveTabs(tabs: Tab[]): void {
+    try {
+      localStorage.setItem('tabs', JSON.stringify(tabs));
+    } catch {
+      /* sem storage */
+    }
+  }
+
+  /** Para onde ir quando a aba atual some: a vizinha visível, ou a tela inicial. */
+  private afterTabGone(tabs: Tab[], goneIndex: number): void {
+    const visible = tabs.filter((t) => !t.min);
+    const next = visible[Math.min(goneIndex, visible.length - 1)];
+    if (next) this.select(next.id);
+    else this.set({ selected: null });
+  }
+
+  /** Recolher: a aba sai da barra mas a conversa continua montada (rascunho, rolagem). */
+  minimizeTab(id: string): void {
+    const i = this.state.tabs.filter((t) => !t.min).findIndex((t) => t.id === id);
+    const tabs = this.state.tabs.map((t) => (t.id === id ? { ...t, min: true } : t));
+    this.saveTabs(tabs);
+    this.set({ tabs });
+    if (this.state.selected === id) this.afterTabGone(tabs, i);
+  }
+
+  /** Fechar: tira a aba de vez (a conversa continua na lateral). Não sai da call. */
+  closeTab(id: string): void {
+    const i = this.state.tabs.filter((t) => !t.min).findIndex((t) => t.id === id);
+    const tabs = this.state.tabs.filter((t) => t.id !== id);
+    this.saveTabs(tabs);
+    this.set({ tabs });
+    if (this.state.selected === id) this.afterTabGone(tabs, i);
+  }
+
+  /** Sino: zera as não lidas de todas as conversas. */
+  markAllRead(): void {
+    this.set({ unread: {} });
+  }
+
   /** Abre uma tela do centro (Início, Amigos, Downloads) no lugar da conversa. */
   openPage(page: Page | null, friendsTab?: FriendsTab): void {
     this.set({ page, selected: null, ...(friendsTab ? { friendsTab } : {}) });
@@ -760,7 +839,7 @@ class App {
     if (!conversationId) return this.set({ selected: null });
     const unread = { ...this.state.unread };
     delete unread[conversationId];
-    this.set({ selected: conversationId, unread });
+    this.set({ selected: conversationId, unread, tabs: this.withTab(conversationId) });
     if (!this.state.messages[conversationId]) {
       const msgs = await window.native.loadMessages(conversationId);
       this.set({ messages: { ...this.state.messages, [conversationId]: msgs } });

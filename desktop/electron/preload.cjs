@@ -60,6 +60,16 @@ contextBridge.exposeInMainWorld('native', {
   focusMain: () => ipcRenderer.invoke('app:focus'),
   idleSeconds: () => ipcRenderer.invoke('app:idle'),
   setFullscreen: (on) => ipcRenderer.invoke('app:fullscreen', on),
+  winState: () => ipcRenderer.invoke('win:state'),
+  winMinimize: () => ipcRenderer.invoke('win:minimize'),
+  winToggleMaximize: () => ipcRenderer.invoke('win:toggleMaximize'),
+  winClose: () => ipcRenderer.invoke('win:close'),
+  winSetNativeFrame: (on) => ipcRenderer.invoke('win:setNativeFrame', on),
+  onWinMaximized: (cb) => {
+    const listener = (_e, max) => cb(max);
+    ipcRenderer.on('win:maximized', listener);
+    return () => ipcRenderer.removeListener('win:maximized', listener);
+  },
   onChooseScreen: (cb) => {
     const listener = (_e, sources) => cb(sources);
     ipcRenderer.on('screen:choose', listener);

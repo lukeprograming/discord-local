@@ -10,13 +10,23 @@ import { Home } from './Home.tsx';
 import { Friends } from './Friends.tsx';
 import { Downloads } from './Downloads.tsx';
 import { MediaEngine, PlayerBar } from './Media.tsx';
+import { TabBar } from './Tabs.tsx';
+import { TitleBar } from './TitleBar.tsx';
 import { Avatar } from './common.tsx';
 
 export function App() {
   const s = useApp((s) => s);
   if (!s.booted) return null;
-  if (!s.profile?.token) return <Setup />;
+  return (
+    <div className="app-root">
+      {s.frameless && <TitleBar />}
+      <div className="app-body">{s.profile?.token ? <Main /> : <Setup />}</div>
+    </div>
+  );
+}
 
+function Main() {
+  const s = useApp((s) => s);
   const selected = s.conversations.find((c) => c.id === s.selected) ?? null;
   const inThisCall = s.call && selected && s.call.conversationId === selected.id;
   // Ampliar só vale enquanto alguém transmite nessa call.
@@ -26,23 +36,26 @@ export function App() {
   const stage = sharing || media ? s.stage : 'normal';
   // Painel da direita: some no modo teatro; sem conversa aberta só se houver call (ferramentas).
   const panel = s.panelOpen && stage !== 'theater' && (!!selected || !!s.call);
+  // Conversas das abas ficam montadas (escondidas) para não perder rascunho e rolagem.
+  // No celular não há abas: só a conversa aberta.
+  const mobile = window.innerWidth <= 700;
+  const mounted = mobile
+    ? selected
+      ? [selected]
+      : []
+    : s.tabs.map((t) => s.conversations.find((c) => c.id === t.id)).filter((c): c is NonNullable<typeof c> => !!c);
+  if (selected && !mounted.some((c) => c.id === selected.id)) mounted.push(selected);
 
   return (
     <div className={`layout stage-${stage} ${selected || s.page ? 'has-selection' : ''} ${panel ? 'panel-open' : ''}`}>
       {stage !== 'theater' && <Sidebar />}
       <main className="main">
-        {selected ? (
-          <>
-            {(inThisCall || s.calls[selected.id]) && <CallPanel conversation={selected} />}
-            {stage === 'normal' && <Chat conversation={selected} />}
-          </>
-        ) : s.page === 'friends' ? (
-          <Friends />
-        ) : s.page === 'downloads' ? (
-          <Downloads />
-        ) : (
-          <Home />
-        )}
+        {!mobile && stage === 'normal' && <TabBar />}
+        {selected && (inThisCall || s.calls[selected.id]) && <CallPanel conversation={selected} />}
+        {mounted.map((c) => (
+          <Chat key={c.id} conversation={c} hidden={c.id !== selected?.id || stage !== 'normal'} />
+        ))}
+        {!selected && (s.page === 'friends' ? <Friends /> : s.page === 'downloads' ? <Downloads /> : <Home />)}
       </main>
       {panel && <RightPanel conversation={selected} />}
       <PlayerBar />

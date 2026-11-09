@@ -68,6 +68,12 @@ export function Settings({ onClose }: { onClose: () => void }) {
             <SharedFolderSection />
             <hr />
             <SpotifySection />
+            {window.native.winSetNativeFrame && (
+              <>
+                <hr />
+                <WindowSection />
+              </>
+            )}
           </>
         )}
         <hr />
@@ -567,6 +573,29 @@ function SpotifySection() {
           <button onClick={() => window.native.spotifyLogin?.().then(refresh)}>🟢 Entrar no Spotify</button>
         )}
       </div>
+    </>
+  );
+}
+
+/** Barra de título: a nossa (padrão) ou a do sistema, se a nossa não se der bem com o PC. */
+function WindowSection() {
+  const frameless = useApp((s) => s.frameless);
+  const [native, setNative] = useState(!frameless);
+  return (
+    <>
+      <h4>Janela</h4>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={native}
+          onChange={(e) => {
+            setNative(e.target.checked);
+            window.native.winSetNativeFrame?.(e.target.checked).catch((err) => app.toast(err.message));
+          }}
+        />
+        Usar a barra de título do sistema
+      </label>
+      {native === frameless && <p className="muted small">Vale na próxima vez que abrir o app.</p>}
     </>
   );
 }
