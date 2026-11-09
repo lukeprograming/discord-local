@@ -1,29 +1,76 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Conversation } from '../../../shared/protocol.ts';
-import { app, useApp } from '../app.ts';
+import {
+  CircleDot,
+  Dices,
+  HeadphoneOff,
+  Headphones,
+  Maximize2,
+  Megaphone,
+  Mic,
+  MicOff,
+  Minimize2,
+  MonitorOff,
+  MonitorUp,
+  Music,
+  PhoneOff,
+  Smartphone,
+  Stethoscope,
+  Video as VideoIcon,
+  VideoOff,
+  Volume2,
+} from 'lucide-react';
+import type { CallParticipant, Conversation } from '../../../shared/protocol.ts';
+import { app, useApp, type PanelTab, type State } from '../app.ts';
 import { SCREEN_PRESETS, type ScreenPreset } from '../rtc.ts';
 import { Avatar } from './common.tsx';
 import { openMini } from '../mini.ts';
 import { sendFiles } from '../files.ts';
-import { BotPanel, BotPlayer } from './YouTubeBot.tsx';
-import { SoundboardPanel } from './Soundboard.tsx';
-import { GamesPanel } from './Games.tsx';
-import { DiagnosticsPanel } from './Diagnostics.tsx';
+import { useMediaVideo } from './Media.tsx';
 import { useIdle, useTileFullscreen } from './tile.tsx';
 import { canRecord, saveClip, setVideoVolume, startClipBuffer, startRecording, stopClipBuffer, stopRecording, useRecorder, type Target } from '../recorder.ts';
 import { hotkeyOf, prettyAccel } from '../hotkeys.ts';
+
+/** Telas sendo transmitidas na call em que estou (minha e dos outros). */
+export function callScreens(s: State): { p: CallParticipant; stream: MediaStream }[] {
+  const session = s.call;
+  if (!session) return [];
+  const remotes = new Map(session.remotes().map((r) => [r.connectionId, r]));
+  return (s.calls[session.conversationId]?.participants ?? [])
+    .filter((p) => p.screen_sharing)
+    .map((p) => ({
+      p,
+      stream: p.connection_id === s.connectionId ? session.screen : (remotes.get(p.connection_id)?.screen ?? null),
+    }))
+    .filter((x): x is { p: CallParticipant; stream: MediaStream } => !!x.stream);
+}
+
+/** Alvos de gravação/clipe da call atual: só o áudio, ou a tela de alguém. */
+export function recordTargets(s: State): Target[] {
+  return [
+    { label: 'Só o áudio da call', stream: null },
+    ...callScreens(s).map(({ p, stream }) => ({
+      label: `Tela de ${app.user(p.user_id)?.display_name ?? '?'}${p.connection_id === s.connectionId ? ' (você)' : ''}`,
+      stream,
+    })),
+  ];
+}
+
+/** Ferramentas da call: cada uma abre a aba dela no painel da direita. */
+const TOOLS: { tab: PanelTab; label: string; Icon: typeof Music }[] = [
+  { tab: 'music', label: 'Música (YouTube, Spotify, SoundCloud)', Icon: Music },
+  { tab: 'games', label: 'Jogos (jogo da velha, quadro)', Icon: Dices },
+  { tab: 'sounds', label: 'Soundboard', Icon: Megaphone },
+  { tab: 'record', label: 'Gravar / clipes', Icon: CircleDot },
+  { tab: 'diag', label: 'Diagnóstico (microfone e conexão)', Icon: Stethoscope },
+];
 
 export function CallPanel({ conversation }: { conversation: Conversation }) {
   const s = useApp((s) => s);
   const info = s.calls[conversation.id];
   const session = s.call?.conversationId === conversation.id ? s.call : null;
   const [shareOpen, setShareOpen] = useState(false);
-  const [botOpen, setBotOpen] = useState(false);
-  const [soundsOpen, setSoundsOpen] = useState(false);
-  const [recOpen, setRecOpen] = useState(false);
-  const [gamesOpen, setGamesOpen] = useState(false);
-  const [diagOpen, setDiagOpen] = useState(false);
   const recState = useRecorder();
+  const video = useMediaVideo();
   const [focused, setFocused] = useState<string | null>(null); // mostrar só a tela dessa conexão
   const [volumeFor, setVolumeFor] = useState<string | null>(null); // conexão com o popup de volume aberto
   const stage = s.stage;
@@ -71,7 +118,9 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
   if (!session) {
     return (
       <div className="call-panel compact">
-        <span>🔊 Call ativa</span>
+        <span className="compact-label">
+          <Volume2 size={16} /> Call ativa
+        </span>
         <div className="call-people">
           {info?.participants.map((p) => <Avatar key={p.connection_id} user={app.user(p.user_id)} size={28} />)}
         </div>
@@ -84,17 +133,12 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
 
   const remotes = new Map(session.remotes().map((r) => [r.connectionId, r]));
   const participants = info?.participants ?? [];
-  const screens = participants
-    .filter((p) => p.screen_sharing)
-    .map((p) => ({
-      p,
-      stream: p.connection_id === s.connectionId ? session.screen : (remotes.get(p.connection_id)?.screen ?? null),
-    }))
-    .filter((x) => x.stream);
+  const screens = callScreens(s);
   const focusedScreen = screens.find((x) => x.p.connection_id === focused) ?? null;
   const media = info?.media;
-  const bot = !!media?.queue.length && !focusedScreen;
+  const bot = !!media?.queue.length && video && !focusedScreen;
   const stageOn = screens.length > 0 || bot;
+  const tool = s.panelOpen ? s.panelTab : null;
 
   return (
     <>
@@ -105,11 +149,12 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
     >
       {stageOn && (
         <div className="screens">
-          {bot && <BotPlayer media={media!} />}
+          {/* O player (Media.tsx) se posiciona por cima deste espaço. */}
+          {bot && <div id="media-slot" className="screen-tile media-slot" />}
           {(focusedScreen ? [focusedScreen] : screens).map(({ p, stream }) => (
             <StreamTile
               key={p.connection_id}
-              stream={stream!}
+              stream={stream}
               userId={p.user_id}
               mine={p.connection_id === s.connectionId}
               recording={!!p.recording}
@@ -130,24 +175,26 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
           const r = remotes.get(p.connection_id);
           const speaking = me ? session.localSpeaking : r?.speaking;
           const cam = me ? session.camera : (r?.camera ?? null);
+          const name = app.user(p.user_id)?.display_name;
           return (
             <div
               key={p.connection_id}
-              className={`call-person ${!me ? 'clickable' : ''}`}
+              className={`call-person ${!me ? 'clickable' : ''} ${speaking ? 'speaking' : ''} ${cam ? 'with-cam' : ''}`}
               title={me ? undefined : `Clique para ajustar o volume${r ? ` — conexão: ${r.state}` : ''}`}
               onClick={me ? undefined : () => setVolumeFor(volumeFor === p.connection_id ? null : p.connection_id)}
             >
               {cam ? (
                 <CamTile stream={cam} speaking={!!speaking} mirror={me} id={`cam-${p.connection_id}`} />
               ) : (
-                <Avatar user={app.user(p.user_id)} size={48} speaking={speaking} />
+                <Avatar user={app.user(p.user_id)} size={56} speaking={speaking} />
               )}
-              <span>
-                {app.user(p.user_id)?.display_name}
-                {p.muted && ' 🔇'}
-                {p.deafened && ' 🙉'}
-                {p.screen_sharing && ' 🖥'}
-                {p.recording && <span className="rec-badge" title="Está gravando a call">⏺ REC</span>}
+              <span className="call-person-name">
+                {conversation.owner_id === p.user_id && <span className="owner-crown" title="Dono">👑</span>}
+                <span className="name-text">{name}</span>
+                {p.muted && <MicOff size={14} className="state-icon" aria-label="microfone desligado" />}
+                {p.deafened && <HeadphoneOff size={14} className="state-icon" aria-label="ensurdecido" />}
+                {p.screen_sharing && <MonitorUp size={14} className="state-icon live" aria-label="transmitindo a tela" />}
+                {p.recording && <span className="rec-badge" title="Está gravando a call">REC</span>}
               </span>
               {!me && r && r.state !== 'connected' && <small className="muted">{r.state === 'failed' ? 'falhou' : 'conectando…'}</small>}
               {volumeFor === p.connection_id && (
@@ -159,86 +206,94 @@ export function CallPanel({ conversation }: { conversation: Conversation }) {
         {participants.length === 1 && <div className="muted small">Chamando…</div>}
       </div>
 
-      <div className="call-controls">
-        <button
-          className={`round ${session.muted ? 'off' : ''}`}
-          title={session.noMic ? 'Sem microfone — você está só ouvindo' : session.muted ? 'Ativar microfone' : 'Silenciar'}
-          disabled={session.noMic}
-          onClick={() => app.toggleMute()}
-        >
-          {session.muted ? '🔇' : '🎙'}
-        </button>
-        <button className={`round ${session.deafened ? 'off' : ''}`} title={session.deafened ? 'Voltar a ouvir' : 'Ensurdecer'} onClick={() => app.toggleDeafen()}>
-          {session.deafened ? '🙉' : '🎧'}
-        </button>
-        {window.native.setSpeaker && (
-          <button className={`round ${s.speaker ? 'on' : ''}`} title={s.speaker ? 'Alto-falante (tocar para usar o fone)' : 'Fone do celular (tocar para usar o alto-falante)'} onClick={() => app.setSpeaker(!s.speaker)}>
-            {s.speaker ? '🔊' : '📱'}
-          </button>
-        )}
-        <button className={`round ${session.camera ? 'on' : ''}`} title={session.camera ? 'Desligar câmera' : 'Ligar câmera'} onClick={() => app.toggleCamera()}>
-          📷
-        </button>
-        {!navigator.mediaDevices?.getDisplayMedia ? null : session.screen ? (
-          <button className="round on" title="Parar transmissão" onClick={() => app.stopScreen()}>
-            ⏹
-          </button>
-        ) : (
-          <button className="round" title="Transmitir tela" onClick={() => setShareOpen(true)}>
-            🖥
-          </button>
-        )}
-        {canRecord() && (
+      <div className="call-controls" role="toolbar" aria-label="Controles da call">
+        <div className="ctrl-group">
           <button
-            className={`round ${recState.recording ? 'red' : recState.clip || recOpen ? 'on' : ''}`}
-            title="Gravar / clipes"
-            onClick={() => setRecOpen(!recOpen)}
+            className={`round ${session.muted ? 'off' : ''}`}
+            title={session.noMic ? 'Sem microfone — você está só ouvindo' : session.muted ? 'Ativar microfone' : 'Silenciar'}
+            aria-label={session.muted ? 'Ativar microfone' : 'Silenciar'}
+            aria-pressed={session.muted}
+            disabled={session.noMic}
+            onClick={() => app.toggleMute()}
           >
-            ⏺
+            {session.muted ? <MicOff size={20} /> : <Mic size={20} />}
           </button>
-        )}
-        <button className={`round ${diagOpen ? 'on' : ''}`} title="Diagnóstico (microfone e conexão)" onClick={() => setDiagOpen(!diagOpen)}>
-          🩺
-        </button>
-        <button className={`round ${gamesOpen ? 'on' : ''}`} title="Jogos (jogo da velha, quadro)" onClick={() => setGamesOpen(!gamesOpen)}>
-          🎲
-        </button>
-        <button className={`round ${soundsOpen ? 'on' : ''}`} title="Soundboard" onClick={() => setSoundsOpen(!soundsOpen)}>
-          📢
-        </button>
-        <button className={`round ${botOpen || media?.queue.length ? 'on' : ''}`} title="Bot do YouTube (vídeo/música juntos)" onClick={() => setBotOpen(!botOpen)}>
-          🎵
-        </button>
-        {stageOn && (
           <button
-            className={`round ${stage !== 'normal' ? 'on' : ''}`}
-            title={stage === 'normal' ? 'Ampliar (esconde o chat)' : stage === 'wide' ? 'Ampliar mais (esconde a lateral)' : 'Voltar ao normal (Esc)'}
-            onClick={() => app.setStage(stage === 'normal' ? 'wide' : stage === 'wide' ? 'theater' : 'normal')}
+            className={`round ${session.deafened ? 'off' : ''}`}
+            title={session.deafened ? 'Voltar a ouvir' : 'Ensurdecer'}
+            aria-label={session.deafened ? 'Voltar a ouvir' : 'Ensurdecer'}
+            aria-pressed={session.deafened}
+            onClick={() => app.toggleDeafen()}
           >
-            {stage === 'theater' ? '⤡' : '⤢'}
+            {session.deafened ? <HeadphoneOff size={20} /> : <Headphones size={20} />}
           </button>
-        )}
-        <button className="round red" title="Sair da call" onClick={() => app.leaveCall()}>
-          ✆
-        </button>
+          {window.native.setSpeaker && (
+            <button
+              className={`round ${s.speaker ? 'on' : ''}`}
+              title={s.speaker ? 'Alto-falante (tocar para usar o fone)' : 'Fone do celular (tocar para usar o alto-falante)'}
+              aria-label="Alto-falante"
+              aria-pressed={s.speaker}
+              onClick={() => app.setSpeaker(!s.speaker)}
+            >
+              {s.speaker ? <Volume2 size={20} /> : <Smartphone size={20} />}
+            </button>
+          )}
+          <button
+            className={`round ${session.camera ? 'on' : ''}`}
+            title={session.camera ? 'Desligar câmera' : 'Ligar câmera'}
+            aria-label={session.camera ? 'Desligar câmera' : 'Ligar câmera'}
+            aria-pressed={!!session.camera}
+            onClick={() => app.toggleCamera()}
+          >
+            {session.camera ? <VideoIcon size={20} /> : <VideoOff size={20} />}
+          </button>
+          {!navigator.mediaDevices?.getDisplayMedia ? null : session.screen ? (
+            <button className="round on" title="Parar transmissão" aria-label="Parar transmissão" onClick={() => app.stopScreen()}>
+              <MonitorOff size={20} />
+            </button>
+          ) : (
+            <button className="round" title="Transmitir tela" aria-label="Transmitir tela" onClick={() => setShareOpen(true)}>
+              <MonitorUp size={20} />
+            </button>
+          )}
+        </div>
+
+        <div className="ctrl-group tools">
+          {TOOLS.filter((t) => t.tab !== 'record' || canRecord()).map(({ tab, label, Icon }) => {
+            const busy =
+              (tab === 'music' && !!media?.queue.length) || (tab === 'record' && (!!recState.recording || !!recState.clip));
+            return (
+              <button
+                key={tab}
+                className={`round small ${tool === tab ? 'on' : ''} ${tab === 'record' && recState.recording ? 'red' : busy ? 'busy' : ''}`}
+                title={label}
+                aria-label={label}
+                aria-pressed={tool === tab}
+                onClick={() => app.openPanel(tab)}
+              >
+                <Icon size={18} />
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="ctrl-group">
+          {stageOn && (
+            <button
+              className={`round small ${stage !== 'normal' ? 'on' : ''}`}
+              title={stage === 'normal' ? 'Ampliar (esconde o chat)' : stage === 'wide' ? 'Ampliar mais (esconde a lateral)' : 'Voltar ao normal (Esc)'}
+              aria-label="Tamanho do palco"
+              onClick={() => app.setStage(stage === 'normal' ? 'wide' : stage === 'wide' ? 'theater' : 'normal')}
+            >
+              {stage === 'theater' ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            </button>
+          )}
+          <button className="round red leave" title="Sair da call" aria-label="Sair da call" onClick={() => app.leaveCall()}>
+            <PhoneOff size={20} />
+          </button>
+        </div>
       </div>
 
-      {recOpen && (
-        <RecordPanel
-          targets={[
-            { label: 'Só o áudio da call', stream: null },
-            ...screens.map(({ p, stream }) => ({
-              label: `Tela de ${app.user(p.user_id)?.display_name ?? '?'}${p.connection_id === s.connectionId ? ' (você)' : ''}`,
-              stream: stream!,
-            })),
-          ]}
-          onClose={() => setRecOpen(false)}
-        />
-      )}
-      {diagOpen && <DiagnosticsPanel onClose={() => setDiagOpen(false)} />}
-      {gamesOpen && <GamesPanel onClose={() => setGamesOpen(false)} />}
-      {soundsOpen && <SoundboardPanel onClose={() => setSoundsOpen(false)} />}
-      {botOpen && <BotPanel media={media} onClose={() => setBotOpen(false)} />}
       {s.callError && <div className="error">{s.callError}</div>}
       {shareOpen && <ShareOptions onClose={() => setShareOpen(false)} />}
     </div>
@@ -526,7 +581,7 @@ function VideoShareControls({ el, name }: { el: HTMLVideoElement; name: string }
   );
 }
 
-function RecordPanel({ targets, onClose }: { targets: Target[]; onClose: () => void }) {
+export function RecordPanel({ targets, onClose }: { targets: Target[]; onClose?: () => void }) {
   const r = useRecorder();
   const clipKey = hotkeyOf(app.state.profile?.settings, 'clip');
   const [, redraw] = useState(0);
@@ -540,7 +595,7 @@ function RecordPanel({ targets, onClose }: { targets: Target[]; onClose: () => v
       <div className="bot-panel-head">
         <strong>⏺ Gravar e clipes</strong>
         <small className="muted">os outros veem que você está gravando</small>
-        <button className="icon" title="Fechar" onClick={onClose}>✕</button>
+        {onClose && <button className="icon" title="Fechar" onClick={onClose}>✕</button>}
       </div>
       {r.recording ? (
         <div className="rec-row">

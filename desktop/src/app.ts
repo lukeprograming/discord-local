@@ -99,7 +99,23 @@ export type State = {
   jumpTo: { conversationId: string; messageId: string } | null;
   /** Retransmissores TURN dos PCs conectados. */
   turnServers: TurnServerInfo[];
+  /** Painel da direita: aberto/fechado e qual aba. */
+  panelOpen: boolean;
+  panelTab: PanelTab;
 };
+
+/** Abas do painel da direita (as de ferramenta só valem dentro de uma call). */
+export type PanelTab = 'people' | 'music' | 'games' | 'sounds' | 'record' | 'diag';
+
+function initialPanelOpen(): boolean {
+  try {
+    const v = localStorage.getItem('panel-open');
+    if (v !== null) return v === '1';
+  } catch {
+    /* sem storage */
+  }
+  return window.innerWidth >= 1600; // telas menores começam com mais espaço pro centro
+}
 
 type Listener = () => void;
 
@@ -136,6 +152,8 @@ class App {
     admin: false,
     jumpTo: null,
     turnServers: [],
+    panelOpen: initialPanelOpen(),
+    panelTab: 'people',
   };
 
   private listeners = new Set<Listener>();
@@ -630,6 +648,24 @@ class App {
 
   setStage(stage: State['stage']): void {
     this.set({ stage });
+  }
+
+  /** Abre o painel da direita numa aba; clicar de novo na aba aberta fecha. */
+  openPanel(tab: PanelTab, toggle = true): void {
+    const { panelOpen, panelTab } = this.state;
+    this.setPanelOpen(toggle && panelOpen && panelTab === tab ? false : true, tab);
+  }
+
+  setPanelOpen(open: boolean, tab = this.state.panelTab): void {
+    // No celular o painel é uma gaveta por cima: não lembra aberto.
+    if (window.innerWidth > 700) {
+      try {
+        localStorage.setItem('panel-open', open ? '1' : '0');
+      } catch {
+        /* sem storage */
+      }
+    }
+    this.set({ panelOpen: open, panelTab: tab });
   }
 
   reconnectNow(): void {

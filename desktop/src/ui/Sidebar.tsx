@@ -5,6 +5,7 @@ import { Avatar, PromptModal } from './common.tsx';
 import { Settings } from './Settings.tsx';
 import { FavoriteMessages, Search } from './Search.tsx';
 import { UpdateBanner } from './Update.tsx';
+import { CallDock } from './CallDock.tsx';
 
 export function Sidebar() {
   const s = useApp((s) => s);
@@ -206,6 +207,7 @@ export function Sidebar() {
         </section>
       </div>
 
+      <CallDock />
       <UpdateBanner />
       <div className="me">
         <button className="me-status" title="Mudar status" onClick={() => setStatusOpen(!statusOpen)} disabled={s.connection !== 'online'}>

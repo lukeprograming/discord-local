@@ -43,7 +43,7 @@ function useActivity(name: ActivityName): Ev[] | null {
   return log;
 }
 
-export function GamesPanel({ onClose }: { onClose: () => void }) {
+export function GamesPanel({ onClose }: { onClose?: () => void }) {
   const [tab, setTab] = useState<ActivityName>('velha');
   return (
     <div className="bot-panel games-panel">
@@ -53,7 +53,7 @@ export function GamesPanel({ onClose }: { onClose: () => void }) {
           <button className={tab === 'velha' ? 'on' : ''} onClick={() => setTab('velha')}>#️⃣ Jogo da velha</button>
           <button className={tab === 'quadro' ? 'on' : ''} onClick={() => setTab('quadro')}>🎨 Quadro</button>
         </div>
-        <button className="icon" title="Fechar" onClick={onClose}>✕</button>
+        {onClose && <button className="icon" title="Fechar" onClick={onClose}>✕</button>}
       </div>
       {tab === 'velha' ? <TicTacToe /> : <Whiteboard />}
     </div>

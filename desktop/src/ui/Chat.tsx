@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { PanelRight } from 'lucide-react';
 import { REACTIONS, type Conversation } from '../../../shared/protocol.ts';
 import { materialize, snippet, type RawMessage, type ViewMessage } from '../messages.ts';
 import { LinkPreviews } from './LinkPreview.tsx';
@@ -228,6 +229,15 @@ export function Chat({ conversation }: { conversation: Conversation }) {
           onClick={() => app.toggleMuteConversation(conversation.id)}
         >
           {app.isMuted(conversation.id) ? '🔕' : '🔔'}
+        </button>
+        <button
+          className={`icon panel-toggle ${s.panelOpen ? 'on' : ''}`}
+          title={s.panelOpen ? 'Fechar painel lateral' : 'Painel lateral (pessoas e ferramentas da call)'}
+          aria-label="Painel lateral"
+          aria-pressed={s.panelOpen}
+          onClick={() => app.setPanelOpen(!s.panelOpen)}
+        >
+          <PanelRight size={19} />
         </button>
         {!inCall && (
           <button

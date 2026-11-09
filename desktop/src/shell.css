@@ -1,0 +1,227 @@
+/* ==== 0.9: estrutura nova (lateral | centro | painel da direita / player no rodapé) ====
+   Carregado depois de styles.css: redefine cores e a moldura; os componentes antigos
+   continuam com os estilos de lá. */
+
+:root {
+  --bg-app: #111218;
+  --bg-0: #17181f;
+  --bg-1: #1d1e27;
+  --bg-2: #22232e;
+  --bg-3: #2f3142;
+  --bg-hover: #2a2c3b;
+  --border: #2a2c3a;
+  --text: #dcdde6;
+  --text-strong: #f2f3f5;
+  --muted: #949ba4;
+  --accent: #7164f2;
+  --accent-hover: #5f53e3;
+  --accent-soft: rgba(113, 100, 242, 0.2);
+  --radius: 8px;
+  --radius-lg: 12px;
+  --gap: 8px;
+  --side-w: 248px;
+  --panel-w: 300px;
+}
+body { background: var(--bg-app); }
+button.icon { display: inline-grid; place-items: center; }
+button.icon.on { color: var(--accent); }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.grow { flex: 1; }
+
+/* ---- moldura ---- */
+.layout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: 'side main panel' 'player player player';
+  gap: var(--gap);
+  padding: var(--gap);
+  height: 100%;
+}
+.sidebar { grid-area: side; width: var(--side-w); min-height: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.main { grid-area: main; min-height: 0; gap: var(--gap); }
+.main > .empty { margin: 0; flex: 1; display: grid; place-content: center; text-align: center; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-lg); max-width: none; padding: 24px; }
+.chat { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.chat-header { box-shadow: none; border-bottom: 1px solid var(--border); padding: 10px 14px; }
+.composer textarea { background: var(--bg-2); border: 1px solid var(--border); }
+.composer textarea:focus { border-color: var(--accent); }
+.presence { border-color: var(--bg-1); }
+
+/* lateral */
+.item.active { background: var(--accent-soft); color: var(--text-strong); box-shadow: inset 3px 0 var(--accent); }
+.me { background: var(--bg-0); border-top: 1px solid var(--border); }
+.me button.icon { padding: 4px 5px; font-size: 16px; }
+.me-name strong, .me-name small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conn, .session { border-bottom-color: var(--border); }
+
+/* "na call" no pé da lateral */
+.call-dock { display: flex; align-items: center; gap: 2px; padding: 8px 8px 8px 10px; background: var(--bg-0); border-top: 1px solid var(--border); }
+.dock-where { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; background: none; padding: 3px 6px; text-align: left; border-radius: 6px; }
+.dock-where:hover { background: var(--bg-hover); filter: none; }
+.dock-status { display: flex; align-items: center; gap: 6px; color: var(--green); font-weight: 600; font-size: 13px; }
+.dock-where small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-btn { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; background: none; color: var(--text); border-radius: 6px; flex-shrink: 0; }
+.dock-btn:hover:not(:disabled) { background: var(--bg-3); filter: none; }
+.dock-btn.off { color: #fa777c; }
+.dock-btn.leave:hover { background: var(--red); color: #fff; }
+
+/* ---- palco da call ---- */
+.call-panel { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; gap: 12px; }
+.call-panel.compact { padding: 8px 14px; }
+.compact-label { display: flex; align-items: center; gap: 6px; color: var(--green); font-weight: 600; }
+.call-people { gap: 10px; }
+.call-person { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 14px 10px; min-width: 150px; transition: border-color 0.15s; }
+.call-person.clickable:hover { border-color: var(--bg-3); }
+.call-person.speaking { border-color: var(--green); }
+.call-person.with-cam { padding: 6px 6px 8px; }
+.call-person-name { display: flex; align-items: center; gap: 5px; max-width: 190px; }
+.name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.owner-crown { font-size: 12px; }
+.state-icon { color: #fa777c; flex-shrink: 0; }
+.state-icon.live { color: var(--accent); }
+.call-panel.compact .call-person { background: none; border: 0; padding: 0; min-width: 0; }
+
+.call-controls { gap: 14px; flex-wrap: wrap; justify-content: center; align-items: center; }
+.ctrl-group { display: flex; gap: 8px; align-items: center; }
+.ctrl-group.tools { padding: 0 14px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+.round { width: 46px; height: 46px; color: var(--text); background: var(--bg-3); }
+.round.small { width: 40px; height: 40px; }
+.round.on { background: var(--accent); color: #fff; }
+.round.off { background: #4e2a2c; color: #fa777c; }
+.round.busy { box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* o player do bot fica por cima deste espaço (Media.tsx) */
+.media-slot { background: #000; }
+.screen-tile.media-frame { position: fixed; z-index: 5; border-radius: var(--radius); }
+.screen-tile.media-frame:not(.shown) { pointer-events: none; }
+
+/* o chat nunca some atrás do palco (telas baixas: 1366×768, 1280×720) */
+.call-panel.with-screens { max-height: calc(100% - 240px); }
+.stage-wide .call-panel.with-screens, .stage-theater .call-panel.with-screens { max-height: none; }
+.stage-resizer { height: var(--gap); margin: calc(-1 * var(--gap)) 0; background: transparent; border: 0; z-index: 1; }
+.stage-resizer::after { top: calc(50% - 1px); }
+.stage-resizer:hover { background: transparent; }
+
+/* ---- painel da direita ---- */
+.rpanel { grid-area: panel; width: var(--panel-w); min-height: 0; display: flex; flex-direction: column; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.rpanel.wide { width: 420px; }
+.rpanel-backdrop { display: none; }
+.rpanel-tabs { display: flex; align-items: center; gap: 2px; padding: 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.rpanel-tab { display: flex; align-items: center; gap: 6px; background: none; color: var(--muted); padding: 6px 8px; border-radius: 8px; font-size: 13px; white-space: nowrap; }
+.rpanel-tab:hover { background: var(--bg-hover); color: var(--text); filter: none; }
+.rpanel-tab.on { background: var(--accent-soft); color: var(--text-strong); }
+.rpanel-close { background: none; padding: 6px; color: var(--muted); display: grid; place-items: center; }
+.rpanel-close:hover { color: var(--text); background: var(--bg-hover); filter: none; }
+.rpanel-callnote { margin: 8px 8px 0; background: var(--accent-soft); color: var(--text); text-align: left; font-size: 12px; border-radius: 8px; padding: 6px 10px; }
+.rpanel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; }
+.rpanel-body .bot-panel { background: none; padding: 0; max-width: none; width: 100%; }
+.rpanel-body .bot-panel-head { flex-wrap: wrap; }
+.rpanel-body .bot-add { flex-wrap: wrap; }
+.rpanel-body .bot-add input { flex-basis: 100%; }
+.rpanel-body .bot-add button { flex: 1; }
+.rpanel-body .bot-queue { max-height: none; }
+.rpanel-body .now-card img { width: 96px; height: 54px; }
+.rpanel-body .bot-queue img { width: 56px; height: 32px; }
+.rpanel-body .diag-mono { max-height: none; }
+.rpanel-body .rec-targets .mini { white-space: normal; text-align: left; }
+
+.people h5 { margin: 4px 4px 8px; font-size: 12px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.02em; }
+.people h5 small { text-transform: none; }
+.people section + section { margin-top: 14px; }
+.person { display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 8px; }
+.person:hover { background: var(--bg-hover); }
+.person.offline { opacity: 0.55; }
+.person-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.person-line, .person-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.person-status { font-size: 12px; }
+.person-icons { display: flex; gap: 4px; align-items: center; }
+.role-badge { font-size: 11px; background: var(--accent-soft); color: #c9c4ff; padding: 1px 8px; border-radius: 6px; flex-shrink: 0; }
+
+/* ---- player do rodapé ---- */
+.playerbar { grid-area: player; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr); align-items: center; gap: 16px; min-height: 72px; padding: 8px 14px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-lg); position: relative; }
+.pb-now { display: flex; align-items: center; gap: 12px; min-width: 0; background: none; padding: 4px; text-align: left; border-radius: 8px; }
+.pb-now:hover { background: var(--bg-hover); filter: none; }
+.pb-now img { width: 96px; height: 54px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: #000; }
+.pb-info { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.pb-info strong { color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-info small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-center { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
+.pb-buttons { display: flex; align-items: center; gap: 10px; }
+.playerbar .pbtn { color: var(--text); display: grid; place-items: center; }
+.playerbar .pbtn:hover { background: var(--bg-hover); }
+.playerbar .pbtn.on { color: var(--accent); }
+.playerbar .pbtn.pb-play { background: var(--accent); color: #fff; width: 40px; height: 40px; }
+.playerbar .pbtn.pb-play:hover { background: var(--accent-hover); }
+.playerbar .seek-wrap { display: flex; align-items: center; gap: 10px; width: 100%; }
+.playerbar .seek { flex: 1; }
+.playerbar .seek::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--accent) var(--pct), var(--bg-3) var(--pct)); }
+.playerbar .seek::-webkit-slider-thumb { background: #fff; opacity: 1; }
+.playerbar .player-time { font-size: 12px; color: var(--muted); min-width: 40px; text-align: center; }
+.pb-right { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; }
+.pb-vol { display: flex; align-items: center; gap: 2px; margin: 0; text-transform: none; font-weight: normal; font-size: inherit; color: inherit; }
+.pb-vol input { width: 90px; margin: 0; accent-color: var(--accent); }
+.pb-preview { font-size: 11px; color: #1db954; border: 1px solid #1db954; border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+
+/* ---- resoluções ---- */
+@media (max-width: 1599px) {
+  :root { --panel-w: 280px; }
+}
+@media (max-width: 1366px) {
+  :root { --side-w: 228px; --gap: 6px; }
+}
+/* 1366×768, 1280×720: tudo mais baixo pra sobrar chat */
+@media (max-height: 800px) {
+  .call-panel { padding: 10px; gap: 8px; }
+  .call-person { padding: 8px 12px 6px; min-width: 120px; gap: 4px; }
+  .call-person .avatar { width: 44px !important; height: 44px !important; font-size: 18px !important; }
+  .round { width: 40px; height: 40px; }
+  .round.small { width: 36px; height: 36px; }
+  .playerbar { min-height: 60px; padding: 6px 12px; }
+  /* com vídeo no palco, participantes viram uma linha compacta e o chat ganha espaço */
+  .call-panel.with-screens { max-height: calc(100% - 300px); }
+  .call-panel.with-screens .call-person:not(.with-cam) { flex-direction: row; padding: 4px 12px 4px 4px; min-width: 0; border-radius: 22px; }
+  .call-panel.with-screens .call-person:not(.with-cam) .avatar { width: 30px !important; height: 30px !important; font-size: 13px !important; }
+  .pb-now img { width: 80px; height: 45px; }
+  .playerbar .pbtn { width: 34px; height: 34px; }
+  .playerbar .pbtn.pb-play { width: 36px; height: 36px; }
+}
+/* janelas médias: painel da direita por cima do centro, sem espremer o chat */
+@media (min-width: 701px) and (max-width: 1279px) {
+  .rpanel { position: fixed; top: var(--gap); right: var(--gap); bottom: var(--gap); z-index: 6; box-shadow: -8px 0 24px rgba(0, 0, 0, 0.45); }
+}
+@media (max-width: 1100px) {
+  .pb-vol input, .pb-hide-sm { display: none; }
+  .playerbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; }
+}
+/* telas muito largas: mensagens não esticam até a borda */
+@media (min-width: 2200px) {
+  .msg-body, .composer-row { max-width: 1100px; }
+}
+
+/* ---- celular ---- */
+@media (max-width: 700px) {
+  .layout { padding: 0; gap: 0; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'content' 'player'; }
+  .sidebar, .main { grid-area: content; }
+  .sidebar { width: 100%; border: 0; border-radius: 0; }
+  .main { gap: 0; }
+  .chat, .call-panel, .main > .empty { border-radius: 0; border-left: 0; border-right: 0; }
+  .call-person { min-width: 0; padding: 8px 10px 6px; }
+  .call-controls { gap: 8px; }
+  .ctrl-group.tools { padding: 0; border: 0; }
+  .round { width: 44px; height: 44px; }
+  .round.small { width: 40px; height: 40px; }
+
+  .rpanel-backdrop { display: block; position: fixed; inset: 0; z-index: 8; background: rgba(0, 0, 0, 0.55); }
+  .rpanel, .rpanel.wide { position: fixed; left: 0; right: 0; bottom: 0; width: auto; height: 80vh; z-index: 9; border-radius: 16px 16px 0 0; border-bottom: 0; box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5); }
+  .rpanel-tabs { overflow-x: auto; }
+  .rpanel-close { padding: 10px; }
+
+  .playerbar { grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; min-height: 58px; padding: 6px 8px 6px 6px; border-radius: 0; border-left: 0; border-right: 0; border-bottom: 0; }
+  .pb-now { gap: 8px; padding: 2px; }
+  .pb-now img { width: 64px; height: 36px; }
+  .pb-center { flex-direction: row; }
+  .pb-buttons { gap: 2px; }
+  .playerbar .seek-wrap { position: absolute; left: 0; right: 0; top: -6px; gap: 0; }
+  .playerbar .seek-wrap .player-time { display: none; }
+  .pb-right > :not(:last-child) { display: none; }
+}

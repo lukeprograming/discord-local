@@ -20,6 +20,11 @@ const GITHUB_REPO = 'lukeprograming/discord-local';
 const profileArg = process.argv.find((a) => a.startsWith('--profile='));
 const profile = profileArg ? profileArg.split('=')[1].replace(/[^a-zA-Z0-9_-]/g, '') : '';
 if (profile) app.setPath('userData', path.join(app.getPath('appData'), `discord-local-${profile}`));
+// Testes visuais: --test-bounds=x,y,largura,altura abre a janela nesse lugar (ex.: no
+// segundo monitor) sem roubar o foco de quem está usando o PC. No Wayland precisa de
+// --ozone-platform=x11 para a posição valer.
+const testBoundsArg = process.argv.find((a) => a.startsWith('--test-bounds='));
+const testBounds = testBoundsArg && testBoundsArg.split('=')[1].split(',').map(Number);
 
 // Uma cópia por perfil: duas tentariam subir o mesmo servidor e mexer nos mesmos arquivos.
 if (!app.requestSingleInstanceLock()) {
@@ -64,7 +69,11 @@ function createWindow() {
       sandbox: true,
       backgroundThrottling: false, // calls continuam fluindo com a janela minimizada
     },
+    ...(testBounds?.length === 4 && testBounds.every(Number.isFinite)
+      ? { x: testBounds[0], y: testBounds[1], width: testBounds[2], height: testBounds[3], show: false }
+      : {}),
   });
+  if (testBounds) win.once('ready-to-show', () => win.showInactive());
 
   if (process.env.VITE_DEV_SERVER_URL) win.loadURL(process.env.VITE_DEV_SERVER_URL);
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));

@@ -5,6 +5,8 @@ import { Setup } from './Setup.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { Chat } from './Chat.tsx';
 import { CallPanel } from './CallPanel.tsx';
+import { RightPanel } from './RightPanel.tsx';
+import { MediaEngine, PlayerBar } from './Media.tsx';
 import { Avatar } from './common.tsx';
 
 export function App() {
@@ -16,10 +18,14 @@ export function App() {
   const inThisCall = s.call && selected && s.call.conversationId === selected.id;
   // Ampliar só vale enquanto alguém transmite nessa call.
   const sharing = !!inThisCall && !!s.calls[selected!.id]?.participants.some((p) => p.screen_sharing);
-  const stage = sharing ? s.stage : 'normal';
+  // Ampliar vale com transmissão ou vídeo do bot no palco.
+  const media = !!inThisCall && !!s.calls[selected!.id]?.media?.queue.length;
+  const stage = sharing || media ? s.stage : 'normal';
+  // Painel da direita: some no modo teatro; sem conversa aberta só se houver call (ferramentas).
+  const panel = s.panelOpen && stage !== 'theater' && (!!selected || !!s.call);
 
   return (
-    <div className={`layout stage-${stage} ${selected ? 'has-selection' : ''}`}>
+    <div className={`layout stage-${stage} ${selected ? 'has-selection' : ''} ${panel ? 'panel-open' : ''}`}>
       {stage !== 'theater' && <Sidebar />}
       <main className="main">
         {selected ? (
@@ -34,6 +40,9 @@ export function App() {
           </div>
         )}
       </main>
+      {panel && <RightPanel conversation={selected} />}
+      <PlayerBar />
+      <MediaEngine />
       <IncomingCall />
       <ScreenPicker />
       {s.toast && <div className="toast">{s.toast}</div>}

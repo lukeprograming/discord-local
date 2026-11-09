@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './ui/App.tsx';
 import { app } from './app.ts';
 import './styles.css';
+import './shell.css';
 
 app.boot();
 // Acesso pelo DevTools (testes automatizados e depuração).

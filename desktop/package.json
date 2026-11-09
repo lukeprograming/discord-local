@@ -50,6 +50,7 @@
   "dependencies": {
     "@sapphi-red/web-noise-suppressor": "^0.4.1",
     "electron-updater": "^6.8.9",
+    "lucide-react": "1.61.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

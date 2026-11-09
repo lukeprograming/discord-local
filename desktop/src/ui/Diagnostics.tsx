@@ -3,7 +3,7 @@ import { app, useApp } from '../app.ts';
 import type { CallDiagnostics } from '../rtc.ts';
 
 /** 🩺 Diagnóstico da call: microfone, caminhos de conexão e áudio indo/chegando de cada pessoa. */
-export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
+export function DiagnosticsPanel({ onClose }: { onClose?: () => void }) {
   const call = useApp((s) => s.call);
   const [d, setD] = useState<CallDiagnostics | null>(null);
   useEffect(() => {
@@ -34,7 +34,7 @@ export function DiagnosticsPanel({ onClose }: { onClose: () => void }) {
         >
           mandar no chat
         </button>
-        <button className="icon" title="Fechar" onClick={onClose}>✕</button>
+        {onClose && <button className="icon" title="Fechar" onClick={onClose}>✕</button>}
       </div>
       {!d ? (
         <small className="muted">Medindo…</small>

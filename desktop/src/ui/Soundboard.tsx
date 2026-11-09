@@ -6,7 +6,7 @@ const fail = (e: unknown) => app.toast((e as Error).message);
 const EMOJIS = ['🔊', '😂', '👏', '📯', '🥁', '💥', '🐐', '💀', '🤡', '🎺', '🔔', '😱'];
 
 /** Botões de som que tocam pra todo mundo na call. */
-export function SoundboardPanel({ onClose }: { onClose: () => void }) {
+export function SoundboardPanel({ onClose }: { onClose?: () => void }) {
   const sounds = useApp((s) => s.sounds);
   const admin = useApp((s) => s.admin);
   const meId = useApp((s) => s.profile?.user.id);
@@ -27,7 +27,7 @@ export function SoundboardPanel({ onClose }: { onClose: () => void }) {
           title={`Volume dos sons pra você: ${volume}%`}
           onChange={(e) => app.saveSettings({ sound_volume: Number(e.target.value) })}
         />
-        <button className="icon" title="Fechar" onClick={onClose}>✕</button>
+        {onClose && <button className="icon" title="Fechar" onClick={onClose}>✕</button>}
       </div>
       <div className="sound-grid">
         {sounds.map((snd) => (
