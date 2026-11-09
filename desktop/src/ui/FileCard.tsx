@@ -1,17 +1,29 @@
 import { useEffect, useState } from 'react';
+import { Download, File, FileArchive, FileAudio, FileImage, FileText, FileVideo, Upload, X } from 'lucide-react';
 import type { FileAttachment } from '../../../shared/protocol.ts';
 import { app } from '../app.ts';
 import { ANDROID_IN_APP_MAX, download, formatSize, inApp, preview, useFile, useUploads } from '../files.ts';
 
-function icon(att: FileAttachment): string {
+function Icon({ att }: { att: FileAttachment }) {
   const m = att.mime;
-  if (m.startsWith('image/')) return '🖼';
-  if (m.startsWith('video/')) return '🎞';
-  if (m.startsWith('audio/')) return '🎵';
-  if (m === 'application/pdf') return '📕';
-  if (/zip|rar|7z|tar|gzip|compressed/.test(m)) return '🗜';
-  if (m.startsWith('text/')) return '📄';
-  return '📎';
+  const C = m.startsWith('image/')
+    ? FileImage
+    : m.startsWith('video/')
+      ? FileVideo
+      : m.startsWith('audio/')
+        ? FileAudio
+        : /zip|rar|7z|tar|gzip|compressed/.test(m)
+          ? FileArchive
+          : m === 'application/pdf' || m.startsWith('text/')
+            ? FileText
+            : File;
+  return <C size={22} />;
+}
+
+/** "ZIP", "PDF"… a partir do nome. */
+function ext(name: string): string {
+  const e = /\.([a-z0-9]{1,5})$/i.exec(name)?.[1];
+  return e ? e.toUpperCase() : 'arquivo';
 }
 
 const fail = (e: unknown) => app.toast((e as Error).message);
@@ -33,13 +45,13 @@ export function FileCard({ conversationId, attachment: att }: { conversationId: 
     <div className="file-card">
       {img && <img className="file-img" src={img} alt={att.name} onClick={android ? undefined : open} title={android ? undefined : 'Abrir'} />}
       <div className="file-row">
-        <span className="file-icon">{icon(att)}</span>
+        <span className="file-icon"><Icon att={att} /></span>
         <div className="file-info">
           <span className="file-name" title={att.name}>
             {att.name}
           </span>
           <small className="muted">
-            {formatSize(att.size)}
+            {formatSize(att.size)} · {ext(att.name)}
             {st.status === 'downloading' && ` — baixando ${Math.floor((st.done / Math.max(1, st.total)) * 100)}%`}
             {st.status === 'error' && ` — ${st.error}`}
           </small>
@@ -58,8 +70,8 @@ export function FileCard({ conversationId, attachment: att }: { conversationId: 
             </>
           )}
           {(st.status === 'remote' || st.status === 'error') && (
-            <button className="mini" onClick={() => download(conversationId, att).catch(fail)}>
-              {inApp(att) ? 'baixar' : 'baixar pelo navegador'}
+            <button className="mini file-dl" title={inApp(att) ? 'Baixar' : 'Baixar pelo navegador'} onClick={() => download(conversationId, att).catch(fail)}>
+              <Download size={15} /> {inApp(att) ? 'baixar' : 'baixar pelo navegador'}
             </button>
           )}
         </div>
@@ -76,12 +88,12 @@ export function UploadList({ conversationId }: { conversationId: string }) {
     <div className="uploads">
       {list.map((u) => (
         <div key={u.key} className="upload">
-          <span>⬆ {u.name}</span>
+          <span><Upload size={13} /> {u.name}</span>
           <div className="file-progress">
             <span style={{ width: `${(u.done / Math.max(1, u.total)) * 100}%` }} />
           </div>
           <small className="muted">{Math.floor((u.done / Math.max(1, u.total)) * 100)}%</small>
-          <button className="icon" title="Cancelar" onClick={u.cancel}>✕</button>
+          <button className="icon" title="Cancelar" aria-label="Cancelar envio" onClick={u.cancel}><X size={16} /></button>
         </div>
       ))}
     </div>

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { PanelRight } from 'lucide-react';
+import { AlarmClock, ArrowLeft, BarChart3, Bell, BellOff, Clock, FolderOpen, Hash, PanelRight, Paperclip, Pencil, Phone, Plus, Reply, SendHorizontal, SmilePlus, Star, Trash2, Volume2 } from 'lucide-react';
 import { REACTIONS, type Conversation } from '../../../shared/protocol.ts';
 import { materialize, snippet, type RawMessage, type ViewMessage } from '../messages.ts';
 import { LinkPreviews } from './LinkPreview.tsx';
@@ -195,11 +195,13 @@ export function Chat({ conversation }: { conversation: Conversation }) {
       {folderOf && <SharedFolder userId={folderOf} onClose={() => setFolderOf(null)} />}
       {dragging && <div className="drop-hint">Solte para enviar para {app.conversationTitle(conversation)}</div>}
       <header className="chat-header">
-        <button className="icon back-btn" title="Voltar" onClick={() => app.select(null)}>←</button>
+        <button className="icon back-btn" title="Voltar" aria-label="Voltar" onClick={() => app.select(null)}>
+          <ArrowLeft size={20} />
+        </button>
         {peer ? (
           <Avatar user={peer} online={s.presences[peer.id] === 'ONLINE'} availability={app.statusOf(peer.id)?.availability} />
         ) : (
-          <span className="avatar group-avatar">{room ? '🔊' : '#'}</span>
+          <span className="avatar group-avatar head-avatar">{room ? <Volume2 size={18} /> : <Hash size={18} />}</span>
         )}
         <div className="chat-title">
           <strong>{app.conversationTitle(conversation)}</strong>
@@ -207,28 +209,31 @@ export function Chat({ conversation }: { conversation: Conversation }) {
             {room
               ? `sala fixa · ${conversation.members.length} pessoas · ${conversation.members.filter((m) => s.presences[m.id] === 'ONLINE' || m.id === meId).length} online`
               : conversation.type === 'GROUP'
-                ? conversation.members.map((m) => m.display_name).join(', ')
+                ? `grupo · ${conversation.members.length} membros · ${conversation.members.filter((m) => s.presences[m.id] === 'ONLINE' || m.id === meId).length} online`
                 : peer && (s.presences[peer.id] === 'ONLINE' ? peerStatusLine(peer.id) : 'offline')}
           </small>
         </div>
         <button
           className={`icon ${app.isFavConversation(conversation.id) ? 'fav-on' : ''}`}
           title={app.isFavConversation(conversation.id) ? 'Tirar dos favoritos' : 'Favoritar conversa (fica no topo da lateral)'}
+          aria-label="Favoritar conversa"
+          aria-pressed={app.isFavConversation(conversation.id)}
           onClick={() => app.toggleFavConversation(conversation.id)}
         >
-          {app.isFavConversation(conversation.id) ? '★' : '☆'}
+          <Star size={18} fill={app.isFavConversation(conversation.id) ? 'currentColor' : 'none'} />
         </button>
         {peer && (
-          <button className="icon" title={`Pasta compartilhada de ${peer.display_name}`} disabled={s.connection !== 'online'} onClick={() => setFolderOf(peer.id)}>
-            📁
+          <button className="icon" title={`Pasta compartilhada de ${peer.display_name}`} disabled={s.connection !== 'online'} aria-label="Pasta compartilhada" onClick={() => setFolderOf(peer.id)}>
+            <FolderOpen size={18} />
           </button>
         )}
         <button
           className="icon"
           title={app.isMuted(conversation.id) ? 'Ativar notificações' : 'Silenciar conversa (menção com @ ainda avisa)'}
+          aria-label={app.isMuted(conversation.id) ? 'Ativar notificações' : 'Silenciar conversa'}
           onClick={() => app.toggleMuteConversation(conversation.id)}
         >
-          {app.isMuted(conversation.id) ? '🔕' : '🔔'}
+          {app.isMuted(conversation.id) ? <BellOff size={18} /> : <Bell size={18} />}
         </button>
         <button
           className={`icon panel-toggle ${s.panelOpen ? 'on' : ''}`}
@@ -246,7 +251,8 @@ export function Chat({ conversation }: { conversation: Conversation }) {
             title={s.connection !== 'online' ? 'Precisa estar conectado' : call ? 'Entrar na call' : 'Iniciar call'}
             onClick={() => app.joinCall(conversation.id).catch((e) => app.toast(e.message))}
           >
-            {room ? '🔊 Entrar na voz' : call ? '🔊 Entrar na call' : '📞 Ligar'}
+            {room || call ? <Volume2 size={16} /> : <Phone size={16} />}
+            <span className="call-btn-label">{room ? 'Entrar na voz' : call ? 'Entrar na call' : 'Ligar'}</span>
           </button>
         )}
       </header>
@@ -298,7 +304,7 @@ export function Chat({ conversation }: { conversation: Conversation }) {
                     </div>
                   )}
                   {m.deleted ? (
-                    <div className="msg-text muted deleted">🗑 mensagem apagada</div>
+                    <div className="msg-text muted deleted"><Trash2 size={13} /> mensagem apagada</div>
                   ) : editing === m.id ? (
                     <EditBox
                       initial={m.content}
@@ -324,7 +330,7 @@ export function Chat({ conversation }: { conversation: Conversation }) {
                           {m.edited && <small className="muted edited"> (editada)</small>}
                         </>
                       )}
-                      {m.pending && <small className="muted" title="Será enviada quando conectar"> ⏳</small>}
+                      {m.pending && <Clock size={13} className="muted pending-icon" aria-label="Será enviada quando conectar" />}
                     </div>
                   )}
                   {!m.deleted && !m.attachment && editing !== m.id && <LinkPreviews text={m.content} />}
@@ -345,8 +351,8 @@ export function Chat({ conversation }: { conversation: Conversation }) {
                 </div>
                 {!m.deleted && !m.pending && editing !== m.id && (
                   <div className="msg-actions" onClick={(e) => e.stopPropagation()}>
-                    <button title="Reagir" onClick={() => setPickerFor(pickerFor === m.id ? null : m.id)}>😀</button>
-                    <button title="Responder" onClick={() => reply(m)}>↩</button>
+                    <button title="Reagir" aria-label="Reagir" onClick={() => setPickerFor(pickerFor === m.id ? null : m.id)}><SmilePlus size={17} /></button>
+                    <button title="Responder" aria-label="Responder" onClick={() => reply(m)}><Reply size={17} /></button>
                     <button
                       title={app.isFavMessage(m.id) ? 'Tirar dos favoritos' : 'Favoritar mensagem'}
                       onClick={() => {
@@ -354,10 +360,10 @@ export function Chat({ conversation }: { conversation: Conversation }) {
                         setMenuFor(null);
                       }}
                     >
-                      {app.isFavMessage(m.id) ? '★' : '☆'}
+                      <Star size={17} fill={app.isFavMessage(m.id) ? 'currentColor' : 'none'} className={app.isFavMessage(m.id) ? 'fav-star' : ''} />
                     </button>
-                    {canEdit(m) && <button title="Editar" onClick={() => { setEditing(m.id); setMenuFor(null); }}>✏️</button>}
-                    {mine && <button title="Apagar" onClick={() => remove(m)}>🗑</button>}
+                    {canEdit(m) && <button title="Editar" aria-label="Editar" onClick={() => { setEditing(m.id); setMenuFor(null); }}><Pencil size={16} /></button>}
+                    {mine && <button title="Apagar" aria-label="Apagar" className="danger-hover" onClick={() => remove(m)}><Trash2 size={16} /></button>}
                     {pickerFor === m.id && (
                       <div className="reaction-picker">
                         {REACTIONS.map((e) => (
@@ -393,10 +399,10 @@ export function Chat({ conversation }: { conversation: Conversation }) {
         {replyTo && (
           <div className="reply-bar">
             <span>
-              ↩ Respondendo a <strong>{app.user(replyTo.sender_id)?.display_name ?? '?'}</strong>
+              <Reply size={14} /> Respondendo a <strong>{app.user(replyTo.sender_id)?.display_name ?? '?'}</strong>
               <span className="muted"> — {snippet(replyTo)}</span>
             </span>
-            <button className="icon" title="Cancelar resposta (Esc)" onClick={() => setReplyTo(null)}>✕</button>
+            <button className="icon" title="Cancelar resposta (Esc)" aria-label="Cancelar resposta" onClick={() => setReplyTo(null)}>✕</button>
           </div>
         )}
         <div className="composer-row">
@@ -411,60 +417,70 @@ export function Chat({ conversation }: { conversation: Conversation }) {
           }}
         />
         {!recording && (
-          <div className="extras-wrap">
-            <button className="attach-btn" title="Enquete / lembrete" onMouseDown={(e) => e.preventDefault()} onClick={() => setExtras(extras === 'menu' ? null : 'menu')}>
-              ➕
-            </button>
-            {extras === 'menu' && (
-              <div className="extras-menu">
-                <button onClick={() => setExtras('poll')}>📊 Enquete <small className="muted">/enquete P? | a | b</small></button>
-                <button onClick={() => setExtras('reminder')}>⏰ Lembrete <small className="muted">/lembrar 20:30 texto</small></button>
-              </div>
+          <div className="composer-box">
+            <div className="extras-wrap">
+              <button
+                className="cbox-btn"
+                title="Anexar arquivo, enquete ou lembrete"
+                aria-label="Anexar"
+                aria-expanded={extras === 'menu'}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setExtras(extras === 'menu' ? null : 'menu')}
+              >
+                <Plus size={20} />
+              </button>
+              {extras === 'menu' && (
+                <div className="extras-menu">
+                  <button
+                    disabled={s.connection !== 'online'}
+                    title={s.connection !== 'online' ? 'Precisa estar conectado para enviar arquivo' : undefined}
+                    onClick={() => {
+                      setExtras(null);
+                      fileInput.current?.click();
+                    }}
+                  >
+                    <Paperclip size={16} /> Enviar arquivo <small className="muted">ou arraste / cole no chat</small>
+                  </button>
+                  <button onClick={() => setExtras('poll')}>
+                    <BarChart3 size={16} /> Enquete <small className="muted">/enquete P? | a | b</small>
+                  </button>
+                  <button onClick={() => setExtras('reminder')}>
+                    <AlarmClock size={16} /> Lembrete <small className="muted">/lembrar 20:30 texto</small>
+                  </button>
+                </div>
+              )}
+            </div>
+            <textarea
+              ref={inputRef}
+              rows={1}
+              value={text}
+              aria-label="Mensagem"
+              placeholder={`Mensagem para ${app.conversationTitle(conversation)}${s.connection !== 'online' ? ' (vai quando conectar)' : ''}`}
+              onChange={(e) => {
+                setText(e.target.value);
+                updateMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
+                if (e.target.value) app.typing(conversation.id);
+              }}
+              onBlur={() => setTimeout(() => setMention(null), 150)}
+              onKeyDown={onKeyDown}
+              onPaste={(e) => {
+                // Print/imagem copiada: vira arquivo.
+                if (e.clipboardData.files.length && s.connection === 'online') {
+                  e.preventDefault();
+                  sendFiles(conversation.id, e.clipboardData.files);
+                }
+              }}
+            />
+            {text.trim() && (
+              <button className="send-btn" title={mobile ? 'Enviar' : 'Enviar (Enter)'} aria-label="Enviar" onMouseDown={(e) => e.preventDefault()} onClick={submit}>
+                <SendHorizontal size={18} />
+              </button>
             )}
           </div>
         )}
         {extras === 'poll' && <PollModal conversationId={conversation.id} onClose={() => setExtras(null)} />}
         {extras === 'reminder' && <ReminderModal conversationId={conversation.id} onClose={() => setExtras(null)} />}
-        {!recording && (
-          <button
-            className="attach-btn"
-            title={s.connection !== 'online' ? 'Precisa estar conectado para enviar arquivo' : 'Enviar arquivo'}
-            disabled={s.connection !== 'online'}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => fileInput.current?.click()}
-          >
-            📎
-          </button>
-        )}
-        {!recording && (
-        <textarea
-          ref={inputRef}
-          rows={1}
-          value={text}
-          placeholder={`Mensagem para ${app.conversationTitle(conversation)}${s.connection !== 'online' ? ' (vai quando conectar)' : ''}`}
-          onChange={(e) => {
-            setText(e.target.value);
-            updateMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
-            if (e.target.value) app.typing(conversation.id);
-          }}
-          onBlur={() => setTimeout(() => setMention(null), 150)}
-          onKeyDown={onKeyDown}
-          onPaste={(e) => {
-            // Print/imagem copiada: vira arquivo.
-            if (e.clipboardData.files.length && s.connection === 'online') {
-              e.preventDefault();
-              sendFiles(conversation.id, e.clipboardData.files);
-            }
-          }}
-        />
-        )}
-        {mobile && text.trim() ? (
-          <button className="send-btn" title="Enviar" onMouseDown={(e) => e.preventDefault()} onClick={submit}>
-            ➤
-          </button>
-        ) : (
-          !text.trim() && <VoiceRecorder conversationId={conversation.id} onRecording={setRecording} />
-        )}
+        {!text.trim() && <VoiceRecorder conversationId={conversation.id} onRecording={setRecording} />}
         </div>
         <div className="typing">
           {typing.length > 0 && `${typing.map((u) => u.display_name).join(', ')} está digitando…`}

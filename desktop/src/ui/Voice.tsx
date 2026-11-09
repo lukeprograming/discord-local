@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Mic, SendHorizontal, Trash2 } from 'lucide-react';
 import { MAX_VOICE_BASE64, MAX_VOICE_MS, VOICE_PEAKS, type VoiceAttachment } from '../../../shared/protocol.ts';
 import { app, useApp } from '../app.ts';
 
@@ -133,21 +134,21 @@ export function VoiceRecorder({ conversationId, onRecording }: { conversationId:
 
   if (elapsed === null) {
     return (
-      <button className="send-btn voice-btn" title="Gravar mensagem de voz" onMouseDown={(e) => e.preventDefault()} onClick={start}>
-        🎤
+      <button className="send-btn voice-btn" title="Gravar mensagem de voz" aria-label="Gravar mensagem de voz" onMouseDown={(e) => e.preventDefault()} onClick={start}>
+        <Mic size={19} />
       </button>
     );
   }
   return (
     <div className="voice-recording">
-      <button className="icon" title="Descartar" onClick={() => rec.current?.stop(false)}>
-        🗑
+      <button className="icon" title="Descartar" aria-label="Descartar áudio" onClick={() => rec.current?.stop(false)}>
+        <Trash2 size={18} />
       </button>
       <span className="rec-dot" style={{ transform: `scale(${1 + level * 0.8})` }} />
       <span className="rec-time">{formatDuration(elapsed)}</span>
       <span className="muted small">gravando… (máx. {formatDuration(MAX_VOICE_MS)})</span>
-      <button className="send-btn" title="Enviar áudio" onClick={() => rec.current?.stop(true)}>
-        ➤
+      <button className="send-btn" title="Enviar áudio" aria-label="Enviar áudio" onClick={() => rec.current?.stop(true)}>
+        <SendHorizontal size={18} />
       </button>
     </div>
   );

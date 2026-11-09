@@ -91,7 +91,7 @@ a { color: #00a8fc; }
 .item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { background: var(--red); color: white; font-size: 11px; font-weight: 700; border-radius: 10px; padding: 1px 7px; }
 .call-badge { background: var(--green); }
-.me { display: flex; align-items: center; gap: 8px; padding: 10px; background: #232428; }
+.sidebar .me { display: flex; align-items: center; gap: 8px; padding: 10px; background: #232428; }
 .me-name { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .me-name strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
 
