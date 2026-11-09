@@ -102,7 +102,13 @@ export type State = {
   /** Painel da direita: aberto/fechado e qual aba. */
   panelOpen: boolean;
   panelTab: PanelTab;
+  /** Tela do centro quando nenhuma conversa está aberta (null = só a lista, no celular). */
+  page: Page | null;
+  friendsTab: FriendsTab;
 };
+
+export type Page = 'home' | 'friends' | 'downloads';
+export type FriendsTab = 'online' | 'all' | 'requests' | 'add';
 
 /** Abas do painel da direita (as de ferramenta só valem dentro de uma call). */
 export type PanelTab = 'people' | 'music' | 'games' | 'sounds' | 'record' | 'diag';
@@ -154,6 +160,8 @@ class App {
     turnServers: [],
     panelOpen: initialPanelOpen(),
     panelTab: 'people',
+    page: null,
+    friendsTab: 'online',
   };
 
   private listeners = new Set<Listener>();
@@ -648,6 +656,20 @@ class App {
 
   setStage(stage: State['stage']): void {
     this.set({ stage });
+  }
+
+  /** Abre uma tela do centro (Início, Amigos, Downloads) no lugar da conversa. */
+  openPage(page: Page | null, friendsTab?: FriendsTab): void {
+    this.set({ page, selected: null, ...(friendsTab ? { friendsTab } : {}) });
+  }
+
+  setFriendsTab(friendsTab: FriendsTab): void {
+    this.set({ friendsTab });
+  }
+
+  /** Conversa direta com um amigo (o servidor cria quando a amizade é aceita). */
+  directWith(userId: string): Conversation | undefined {
+    return this.state.conversations.find((c) => c.type === 'DIRECT' && this.directPeer(c)?.id === userId);
   }
 
   /** Abre o painel da direita numa aba; clicar de novo na aba aberta fecha. */

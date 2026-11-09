@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Availability, UserPublic } from '../../../shared/protocol.ts';
+import { app } from '../app.ts';
 
 const COLORS = ['#5865f2', '#3ba55c', '#faa61a', '#ed4245', '#eb459e', '#00a8fc', '#9b59b6', '#1abc9c'];
 
@@ -101,4 +102,21 @@ export function formatTime(ms: number): string {
   yesterday.setDate(today.getDate() - 1);
   if (d.toDateString() === yesterday.toDateString()) return `ontem ${time}`;
   return `${d.toLocaleDateString('pt-BR')} ${time}`;
+}
+
+/** Cabeçalho das telas do centro (Início, Amigos, Downloads). No celular tem o "voltar". */
+export function PageHeader({ icon, title, subtitle, children }: { icon: React.ReactNode; title: string; subtitle?: string; children?: React.ReactNode }) {
+  return (
+    <header className="page-header">
+      <button className="icon back-btn" title="Voltar" aria-label="Voltar" onClick={() => app.openPage(null)}>
+        ←
+      </button>
+      <span className="page-icon">{icon}</span>
+      <div className="page-title">
+        <h2>{title}</h2>
+        {subtitle && <small className="muted">{subtitle}</small>}
+      </div>
+      {children}
+    </header>
+  );
 }

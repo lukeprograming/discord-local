@@ -1,5 +1,20 @@
 import { useEffect, useState } from 'react';
-import { app, useApp } from '../app.ts';
+import {
+  BellOff,
+  ChevronDown,
+  Download,
+  Hash,
+  HeadphoneOff,
+  House,
+  MicOff,
+  Plus,
+  Search as SearchIcon,
+  Settings as SettingsIcon,
+  Star,
+  Users,
+  Volume2,
+} from 'lucide-react';
+import { app, useApp, type Page } from '../app.ts';
 import type { Availability, Conversation } from '../../../shared/protocol.ts';
 import { Avatar, PromptModal } from './common.tsx';
 import { Settings } from './Settings.tsx';
@@ -7,14 +22,24 @@ import { FavoriteMessages, Search } from './Search.tsx';
 import { UpdateBanner } from './Update.tsx';
 import { CallDock } from './CallDock.tsx';
 
+type SectionId = 'favs' | 'rooms' | 'dms' | 'groups';
+
+function loadCollapsed(): SectionId[] {
+  try {
+    return JSON.parse(localStorage.getItem('side-collapsed') || '[]');
+  } catch {
+    return [];
+  }
+}
+
 export function Sidebar() {
   const s = useApp((s) => s);
-  const [adding, setAdding] = useState(false);
   const [grouping, setGrouping] = useState(false);
   const [settings, setSettings] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   const [favsOpen, setFavsOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState<SectionId[]>(loadCollapsed);
   // Ctrl+K / Ctrl+Shift+F abrem a busca de qualquer lugar.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -31,13 +56,45 @@ export function Sidebar() {
   const myStatus = app.myStatus();
 
   const incoming = s.friends.filter((f) => f.status === 'INCOMING');
-  const outgoing = s.friends.filter((f) => f.status === 'OUTGOING');
   const favs = s.conversations.filter((c) => app.isFavConversation(c.id));
   const notFav = (c: Conversation) => !app.isFavConversation(c.id);
   const directs = s.conversations.filter((c) => c.type === 'DIRECT' && notFav(c));
   const groups = s.conversations.filter((c) => c.type === 'GROUP' && notFav(c));
   const rooms = s.conversations.filter((c) => c.type === 'ROOM' && notFav(c));
   const friendIds = new Set(s.friends.filter((f) => f.status === 'ACCEPTED').map((f) => f.user.id));
+  const mobile = window.innerWidth <= 700;
+  // Sem conversa aberta: no PC o centro mostra o Início; no celular, só a lista.
+  const page: Page | null = s.selected ? null : (s.page ?? (mobile ? null : 'home'));
+
+  function toggle(id: SectionId) {
+    const next = collapsed.includes(id) ? collapsed.filter((x) => x !== id) : [...collapsed, id];
+    setCollapsed(next);
+    try {
+      localStorage.setItem('side-collapsed', JSON.stringify(next));
+    } catch {
+      /* sem storage */
+    }
+  }
+
+  const unreadIn = (list: Conversation[]) => list.reduce((n, c) => n + (app.isMuted(c.id) ? 0 : (s.unread[c.id] ?? 0)), 0);
+
+  const section = (id: SectionId, title: string, list: Conversation[], add: React.ReactNode, body: React.ReactNode) => {
+    const closed = collapsed.includes(id);
+    const hidden = closed ? unreadIn(list) : 0;
+    return (
+      <section className={`side-section ${closed ? 'closed' : ''}`}>
+        <h5>
+          <button className="section-toggle" aria-expanded={!closed} onClick={() => toggle(id)}>
+            <ChevronDown size={14} className="chev" />
+            {title}
+            {hidden > 0 && <span className="badge">{hidden}</span>}
+          </button>
+          {add}
+        </h5>
+        {!closed && body}
+      </section>
+    );
+  };
 
   const convItem = (c: (typeof s.conversations)[number]) => {
     const peer = app.directPeer(c);
@@ -47,7 +104,13 @@ export function Sidebar() {
     const muted = app.isMuted(c.id);
     return (
       <button key={c.id} className={`item ${s.selected === c.id ? 'active' : ''} ${muted ? 'muted-conv' : ''}`} onClick={() => app.select(c.id)}>
-        {peer ? <Avatar user={peer} online={online} availability={st?.availability} /> : <span className="avatar group-avatar">#</span>}
+        {peer ? (
+          <Avatar user={peer} online={online} availability={st?.availability} />
+        ) : (
+          <span className="avatar group-avatar">
+            <Hash size={16} />
+          </span>
+        )}
         <span className="item-name">
           {app.conversationTitle(c)}
           {peer && !friendIds.has(peer.id) && <small className="muted"> (não é mais amigo)</small>}
@@ -57,8 +120,12 @@ export function Sidebar() {
             </small>
           )}
         </span>
-        {muted && <span title="Silenciada">🔕</span>}
-        {call && <span className="badge call-badge" title="Call ativa">🔊 {call.participants.length}</span>}
+        {muted && <BellOff size={14} className="item-flag" aria-label="silenciada" />}
+        {call && call.participants.length > 0 && (
+          <span className="badge call-badge" title="Call ativa">
+            <Volume2 size={11} /> {call.participants.length}
+          </span>
+        )}
         {!!s.unread[c.id] && <span className={`badge ${muted ? 'badge-muted' : ''}`}>{s.unread[c.id]}</span>}
       </button>
     );
@@ -67,10 +134,11 @@ export function Sidebar() {
   const roomItem = (c: Conversation) => {
     const call = s.calls[c.id];
     const inThis = s.call?.conversationId === c.id;
+    const muted = app.isMuted(c.id);
     return (
       <div key={c.id} className="room">
         <button
-          className={`item ${s.selected === c.id ? 'active' : ''} ${app.isMuted(c.id) ? 'muted-conv' : ''}`}
+          className={`item ${s.selected === c.id ? 'active' : ''} ${muted ? 'muted-conv' : ''}`}
           onClick={() => app.select(c.id)}
           onContextMenu={(e) => {
             if (!s.admin) return;
@@ -79,10 +147,12 @@ export function Sidebar() {
           }}
           title={s.admin ? 'Botão direito: renomear/apagar' : undefined}
         >
-          <span className="room-icon">🔊</span>
+          <span className="room-icon">
+            <Volume2 size={17} />
+          </span>
           <span className="item-name">{app.conversationTitle(c)}</span>
-          {app.isMuted(c.id) && <span title="Silenciada">🔕</span>}
-          {!!s.unread[c.id] && <span className={`badge ${app.isMuted(c.id) ? 'badge-muted' : ''}`}>{s.unread[c.id]}</span>}
+          {muted && <BellOff size={14} className="item-flag" aria-label="silenciada" />}
+          {!!s.unread[c.id] && <span className={`badge ${muted ? 'badge-muted' : ''}`}>{s.unread[c.id]}</span>}
           {!inThis && (
             <span
               className="room-join"
@@ -102,9 +172,9 @@ export function Sidebar() {
             {call.participants.map((p) => (
               <div key={p.connection_id} className="room-person">
                 <Avatar user={app.user(p.user_id)} size={20} speaking={inThis && (p.connection_id === s.connectionId ? s.call?.localSpeaking : s.call?.remotes().find((r) => r.connectionId === p.connection_id)?.speaking)} />
-                <span>{app.user(p.user_id)?.display_name}</span>
-                {p.muted && <small>🔇</small>}
-                {p.deafened && <small>🙉</small>}
+                <span className="item-name">{app.user(p.user_id)?.display_name}</span>
+                {p.muted && <MicOff size={13} className="state-icon" aria-label="microfone desligado" />}
+                {p.deafened && <HeadphoneOff size={13} className="state-icon" aria-label="ensurdecido" />}
                 {p.screen_sharing && <small className="live">AO VIVO</small>}
               </div>
             ))}
@@ -114,8 +184,30 @@ export function Sidebar() {
     );
   };
 
+  const nav = (id: Page, label: string, Icon: typeof House, badge?: number) => (
+    <button className={`nav-item ${page === id ? 'active' : ''}`} aria-current={page === id ? 'page' : undefined} onClick={() => app.openPage(id)}>
+      <Icon size={18} />
+      <span className="item-name">{label}</span>
+      {!!badge && <span className="badge">{badge}</span>}
+    </button>
+  );
+
   return (
     <aside className="sidebar">
+      <div className="me">
+        <button className="me-status" title="Mudar status" onClick={() => setStatusOpen(!statusOpen)} disabled={s.connection !== 'online'}>
+          <Avatar user={me} size={40} online={s.connection === 'online'} availability={myStatus.availability} />
+          <div className="me-name">
+            <strong>{me.display_name}</strong>
+            <small className="muted">{myStatus.text || myStatus.emoji ? `${myStatus.emoji} ${myStatus.text}` : `@${me.username}`}</small>
+          </div>
+          <ChevronDown size={16} className="muted" />
+        </button>
+        <button className="icon" title="Configurações" aria-label="Configurações" onClick={() => setSettings(true)}>
+          <SettingsIcon size={18} />
+        </button>
+      </div>
+
       {s.profile!.role === 'host' ? (
         <div className={`session ${s.host.running ? 'on' : ''}`}>
           {s.host.running ? (
@@ -146,83 +238,72 @@ export function Sidebar() {
         </div>
       )}
 
+      <nav className="side-nav" aria-label="Navegação">
+        {nav('home', 'Início', House)}
+        {nav('friends', 'Amigos', Users, incoming.length)}
+        {nav('downloads', 'Downloads', Download)}
+        <button className="nav-item" title="Ctrl+K" onClick={() => setSearching(true)}>
+          <SearchIcon size={18} />
+          <span className="item-name">Buscar</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+        <button className="nav-item" onClick={() => setFavsOpen(true)}>
+          <Star size={18} />
+          <span className="item-name">Favoritas</span>
+        </button>
+      </nav>
+
       <div className="sidebar-scroll">
-        {incoming.length > 0 && (
-          <section>
-            <h5>Pedidos de amizade</h5>
-            {incoming.map((f) => (
-              <div key={f.user.id} className="item request">
-                <Avatar user={f.user} />
-                <span className="item-name">{f.user.display_name}</span>
-                <button className="mini green" title="Aceitar" onClick={() => app.acceptFriend(f.user.id).catch((e) => app.toast(e.message))}>✓</button>
-                <button className="mini red" title="Recusar" onClick={() => app.removeFriend(f.user.id).catch((e) => app.toast(e.message))}>✕</button>
-              </div>
-            ))}
-          </section>
+        {favs.length > 0 &&
+          section('favs', 'Favoritos', favs, null, favs.map((c) => (c.type === 'ROOM' ? roomItem(c) : convItem(c))))}
+
+        {(rooms.length > 0 || s.admin) &&
+          section(
+            'rooms',
+            'Salas',
+            rooms,
+            s.admin && (
+              <button className="section-add" onClick={() => setRoomPrompt({ mode: 'create' })} title="Criar sala" aria-label="Criar sala">
+                <Plus size={15} />
+              </button>
+            ),
+            rooms.map(roomItem),
+          )}
+
+        {section(
+          'dms',
+          'Mensagens diretas',
+          directs,
+          <button className="section-add" onClick={() => app.openPage('friends', 'add')} title="Adicionar amigo" aria-label="Adicionar amigo">
+            <Plus size={15} />
+          </button>,
+          <>
+            {directs.map(convItem)}
+            {!directs.length && (
+              <p className="muted small pad">
+                Nenhum amigo ainda. <button className="link" onClick={() => app.openPage('friends', 'add')}>adicionar</button>
+              </p>
+            )}
+          </>,
         )}
 
-        {favs.length > 0 && (
-          <section>
-            <h5>⭐ Favoritos</h5>
-            {favs.map((c) => (c.type === 'ROOM' ? roomItem(c) : convItem(c)))}
-          </section>
+        {section(
+          'groups',
+          'Grupos',
+          groups,
+          <button className="section-add" onClick={() => setGrouping(true)} title="Criar grupo" aria-label="Criar grupo">
+            <Plus size={15} />
+          </button>,
+          <>
+            {groups.map(convItem)}
+            {!groups.length && <p className="muted small pad">Nenhum grupo.</p>}
+          </>,
         )}
-
-        {(rooms.length > 0 || s.admin) && (
-          <section>
-            <h5>
-              Salas
-              {s.admin && (
-                <button className="link" onClick={() => setRoomPrompt({ mode: 'create' })} title="Criar sala">
-                  + sala
-                </button>
-              )}
-            </h5>
-            {rooms.map(roomItem)}
-          </section>
-        )}
-
-        <section>
-          <h5>
-            Mensagens diretas
-            <button className="link" onClick={() => setAdding(true)} title="Adicionar amigo">+ amigo</button>
-          </h5>
-          {directs.map(convItem)}
-          {!directs.length && <p className="muted small pad">Nenhum amigo ainda.</p>}
-          {outgoing.map((f) => (
-            <div key={f.user.id} className="item pending">
-              <Avatar user={f.user} />
-              <span className="item-name">{f.user.display_name} <small className="muted">(pendente)</small></span>
-              <button className="mini" title="Cancelar pedido" onClick={() => app.removeFriend(f.user.id).catch((e) => app.toast(e.message))}>✕</button>
-            </div>
-          ))}
-        </section>
-
-        <section>
-          <h5>
-            Grupos
-            <button className="link" onClick={() => setGrouping(true)} title="Criar grupo">+ grupo</button>
-          </h5>
-          {groups.map(convItem)}
-        </section>
       </div>
 
       <CallDock />
       <UpdateBanner />
-      <div className="me">
-        <button className="me-status" title="Mudar status" onClick={() => setStatusOpen(!statusOpen)} disabled={s.connection !== 'online'}>
-          <Avatar user={me} online={s.connection === 'online'} availability={myStatus.availability} />
-          <div className="me-name">
-            <strong>{me.display_name}</strong>
-            <small className="muted">{myStatus.text || myStatus.emoji ? `${myStatus.emoji} ${myStatus.text}` : `@${me.username}`}</small>
-          </div>
-        </button>
-        <button className="icon" title="Mensagens favoritas" onClick={() => setFavsOpen(true)}>⭐</button>
-        <button className="icon" title="Buscar mensagens (Ctrl+K)" onClick={() => setSearching(true)}>🔍</button>
-        <button className="icon" title="Configurações" onClick={() => setSettings(true)}>⚙</button>
-      </div>
 
-      {adding && <AddFriend onClose={() => setAdding(false)} />}
       {grouping && <CreateGroup onClose={() => setGrouping(false)} />}
       {settings && <Settings onClose={() => setSettings(false)} />}
       {statusOpen && <StatusEditor onClose={() => setStatusOpen(false)} />}
@@ -244,52 +325,6 @@ export function Sidebar() {
         <RoomEditor room={roomPrompt.room} onClose={() => setRoomPrompt(null)} />
       )}
     </aside>
-  );
-}
-
-function AddFriend({ onClose }: { onClose: () => void }) {
-  const [username, setUsername] = useState('');
-  const [error, setError] = useState('');
-  const [invite, setInvite] = useState('');
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    try {
-      await app.addFriend(username.trim());
-      app.toast(`Pedido enviado para ${username}`);
-      onClose();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <h3>Adicionar amigo</h3>
-        <label>
-          Nome de usuário
-          <input autoFocus value={username} onChange={(e) => setUsername(e.target.value)} placeholder="ex: joao" />
-        </label>
-        {error && <div className="error">{error}</div>}
-        <div className="modal-actions">
-          <button type="button" onClick={onClose}>Cancelar</button>
-          <button className="primary" disabled={!username.trim()}>Enviar pedido</button>
-        </div>
-        <hr />
-        <p className="muted small">Seu amigo ainda não tem conta? Gere um convite (vale uma vez):</p>
-        {invite ? (
-          <div className="invite">
-            <code>{invite}</code>
-            <button type="button" onClick={() => navigator.clipboard.writeText(invite)}>Copiar</button>
-          </div>
-        ) : (
-          <button type="button" onClick={() => app.createInvite().then(setInvite).catch((e) => setError(e.message))}>
-            Gerar código de convite
-          </button>
-        )}
-      </form>
-    </div>
   );
 }
 

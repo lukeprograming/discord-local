@@ -6,6 +6,9 @@ import { Sidebar } from './Sidebar.tsx';
 import { Chat } from './Chat.tsx';
 import { CallPanel } from './CallPanel.tsx';
 import { RightPanel } from './RightPanel.tsx';
+import { Home } from './Home.tsx';
+import { Friends } from './Friends.tsx';
+import { Downloads } from './Downloads.tsx';
 import { MediaEngine, PlayerBar } from './Media.tsx';
 import { Avatar } from './common.tsx';
 
@@ -25,7 +28,7 @@ export function App() {
   const panel = s.panelOpen && stage !== 'theater' && (!!selected || !!s.call);
 
   return (
-    <div className={`layout stage-${stage} ${selected ? 'has-selection' : ''} ${panel ? 'panel-open' : ''}`}>
+    <div className={`layout stage-${stage} ${selected || s.page ? 'has-selection' : ''} ${panel ? 'panel-open' : ''}`}>
       {stage !== 'theater' && <Sidebar />}
       <main className="main">
         {selected ? (
@@ -33,11 +36,12 @@ export function App() {
             {(inThisCall || s.calls[selected.id]) && <CallPanel conversation={selected} />}
             {stage === 'normal' && <Chat conversation={selected} />}
           </>
+        ) : s.page === 'friends' ? (
+          <Friends />
+        ) : s.page === 'downloads' ? (
+          <Downloads />
         ) : (
-          <div className="empty">
-            <h2>Bem-vindo, {s.profile.user.display_name}</h2>
-            <p className="muted">Escolha uma conversa na lateral, ou adicione um amigo pelo nome de usuário.</p>
-          </div>
+          <Home />
         )}
       </main>
       {panel && <RightPanel conversation={selected} />}
