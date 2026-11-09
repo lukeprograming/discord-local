@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { AppWindow, FolderOpen, Keyboard, Mic, Music, RefreshCw, Server, UserRound, X } from 'lucide-react';
 import { app, errorMessage, micSettings, useApp } from '../app.ts';
 import { accelFromEvent, hotkeyOf, prettyAccel } from '../hotkeys.ts';
 import { MIC_SAMPLE_RATE, MicProcessor, micConstraints, type NoiseMode } from '../mic.ts';
@@ -6,10 +7,13 @@ import { UpdateSection } from './Update.tsx';
 import type { NetInterface } from '../native.d.ts';
 import type { InviteInfo } from '../../../shared/protocol.ts';
 
-export function Settings({ onClose }: { onClose: () => void }) {
+export type SettingsCategory = 'audio' | 'shortcuts' | 'media' | 'share' | 'server' | 'window' | 'updates' | 'account';
+
+export function Settings({ onClose, initial = 'audio' }: { onClose: () => void; initial?: SettingsCategory }) {
   const profile = useApp((s) => s.profile)!;
   const mobile = useApp((s) => s.platform === 'android');
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [cat, setCat] = useState<SettingsCategory>(initial);
 
   useEffect(() => {
     // Os nomes dos dispositivos só aparecem depois da permissão de microfone.
@@ -20,73 +24,109 @@ export function Settings({ onClose }: { onClose: () => void }) {
       .finally(() => navigator.mediaDevices.enumerateDevices().then(setDevices));
   }, []);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   // A fonte virtual do áudio da transmissão (Linux) não é microfone de verdade.
   const inputs = devices.filter((d) => d.kind === 'audioinput' && !d.label.startsWith('Discord Local ('));
   const outputs = devices.filter((d) => d.kind === 'audiooutput');
   const cameras = devices.filter((d) => d.kind === 'videoinput');
 
+  const cats: { id: SettingsCategory; label: string; Icon: typeof Mic }[] = [
+    { id: 'audio', label: 'Áudio e vídeo', Icon: Mic },
+    ...(!mobile
+      ? [
+          { id: 'shortcuts' as const, label: 'Atalhos', Icon: Keyboard },
+          { id: 'media' as const, label: 'Música', Icon: Music },
+          { id: 'share' as const, label: 'Pasta compartilhada', Icon: FolderOpen },
+        ]
+      : []),
+    { id: 'server', label: profile.role === 'host' ? 'Servidor (host)' : 'Servidor', Icon: Server },
+    ...(!mobile && window.native.winSetNativeFrame ? [{ id: 'window' as const, label: 'Janela', Icon: AppWindow }] : []),
+    { id: 'updates', label: 'Atualizações', Icon: RefreshCw },
+    { id: 'account', label: 'Conta e dados', Icon: UserRound },
+  ];
+  const current = cats.find((c) => c.id === cat) ?? cats[0];
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Configurações</h3>
-        <label>
-          Microfone
-          <select value={profile.settings?.mic_id ?? ''} onChange={(e) => app.saveSettings({ mic_id: e.target.value || undefined })}>
-            <option value="">Padrão do sistema</option>
-            {inputs.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Saída de áudio
-          <select value={profile.settings?.speaker_id ?? ''} onChange={(e) => app.saveSettings({ speaker_id: e.target.value || undefined })}>
-            <option value="">Padrão do sistema</option>
-            {outputs.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>
-            ))}
-          </select>
-        </label>
-        <MicSection />
-        {cameras.length > 0 && (
-          <label>
-            Câmera
-            <select value={profile.settings?.camera_id ?? ''} onChange={(e) => app.saveSettings({ camera_id: e.target.value || undefined })}>
-              <option value="">{mobile ? 'Frontal' : 'Padrão do sistema'}</option>
-              {cameras.map((d, i) => (
-                <option key={d.deviceId} value={d.deviceId}>{d.label || `Câmera ${i + 1}`}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        <p className="muted small">Trocar de dispositivo vale a partir da próxima call (volume e sensibilidade valem na hora).</p>
-        {!mobile && (
-          <>
-            <hr />
-            <HotkeySection />
-            <hr />
-            <SharedFolderSection />
-            <hr />
-            <SpotifySection />
-            {window.native.winSetNativeFrame && (
+      <div className="modal settings-modal" role="dialog" aria-label="Configurações" onClick={(e) => e.stopPropagation()}>
+        <nav className="settings-nav" aria-label="Categorias">
+          <h3>Configurações</h3>
+          {cats.map(({ id, label, Icon }) => (
+            <button key={id} className={`settings-cat ${current.id === id ? 'on' : ''}`} aria-current={current.id === id ? 'page' : undefined} onClick={() => setCat(id)}>
+              <Icon size={17} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+        <section className="settings-body">
+          <header className="settings-head">
+            <h2>{current.label}</h2>
+            <button className="icon" title="Fechar (Esc)" aria-label="Fechar" onClick={onClose}>
+              <X size={20} />
+            </button>
+          </header>
+          <div className="settings-content">
+            {current.id === 'audio' && (
               <>
-                <hr />
-                <WindowSection />
+                <label>
+                  Microfone
+                  <select value={profile.settings?.mic_id ?? ''} onChange={(e) => app.saveSettings({ mic_id: e.target.value || undefined })}>
+                    <option value="">Padrão do sistema</option>
+                    {inputs.map((d) => (
+                      <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Saída de áudio
+                  <select value={profile.settings?.speaker_id ?? ''} onChange={(e) => app.saveSettings({ speaker_id: e.target.value || undefined })}>
+                    <option value="">Padrão do sistema</option>
+                    {outputs.map((d) => (
+                      <option key={d.deviceId} value={d.deviceId}>{d.label || d.deviceId}</option>
+                    ))}
+                  </select>
+                </label>
+                <MicSection />
+                {cameras.length > 0 && (
+                  <label>
+                    Câmera
+                    <select value={profile.settings?.camera_id ?? ''} onChange={(e) => app.saveSettings({ camera_id: e.target.value || undefined })}>
+                      <option value="">{mobile ? 'Frontal' : 'Padrão do sistema'}</option>
+                      {cameras.map((d, i) => (
+                        <option key={d.deviceId} value={d.deviceId}>{d.label || `Câmera ${i + 1}`}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <p className="muted small">Trocar de dispositivo vale a partir da próxima call (volume e sensibilidade valem na hora).</p>
               </>
             )}
-          </>
-        )}
-        <hr />
-        {profile.role === 'host' ? <HostSection /> : <ServerAddress />}
-        <hr />
-        <UpdateSection />
-        <hr />
-        <p className="small muted">Seu histórico fica salvo neste {mobile ? 'celular' : 'computador'}, na pasta de dados do app.</p>
-        <div className="modal-actions">
-          {!mobile && <button onClick={() => window.native.openDataDir()}>Abrir pasta de dados</button>}
-          <button className="danger" onClick={() => { onClose(); app.logout(); }}>Sair da conta</button>
-          <button className="primary" onClick={onClose}>Fechar</button>
-        </div>
+            {current.id === 'shortcuts' && <HotkeySection />}
+            {current.id === 'media' && <SpotifySection />}
+            {current.id === 'share' && <SharedFolderSection />}
+            {current.id === 'server' && (profile.role === 'host' ? <HostSection /> : <ServerAddress />)}
+            {current.id === 'window' && <WindowSection />}
+            {current.id === 'updates' && <UpdateSection />}
+            {current.id === 'account' && (
+              <>
+                <h4>Conta</h4>
+                <p className="small">
+                  Conectado como <strong>{profile.user.display_name}</strong> <span className="muted">(@{profile.user.username})</span>
+                </p>
+                <p className="small muted">Seu histórico fica salvo neste {mobile ? 'celular' : 'computador'}, na pasta de dados do app.</p>
+                <div className="modal-actions start">
+                  {!mobile && <button onClick={() => window.native.openDataDir()}>Abrir pasta de dados</button>}
+                  <button className="danger" onClick={() => { onClose(); app.logout(); }}>Sair da conta</button>
+                </div>
+              </>
+            )}
+          </div>
+        </section>
       </div>
     </div>
   );

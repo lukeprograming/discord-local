@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { app, useApp } from '../app.ts';
 import type { ScreenSource } from '../native.d.ts';
 import { Setup } from './Setup.tsx';
@@ -18,15 +18,27 @@ export function App() {
   const s = useApp((s) => s);
   if (!s.booted) return null;
   return (
-    <div className="app-root">
+    <div className={`app-root ${s.frameless ? 'frameless' : ''}`}>
       {s.frameless && <TitleBar />}
       <div className="app-body">{s.profile?.token ? <Main /> : <Setup />}</div>
     </div>
   );
 }
 
+/** Largura da janela (redesenha ao redimensionar: PC ↔ modo celular). */
+function useNarrow(): boolean {
+  return useSyncExternalStore(
+    (l) => {
+      window.addEventListener('resize', l);
+      return () => window.removeEventListener('resize', l);
+    },
+    () => window.innerWidth <= 700,
+  );
+}
+
 function Main() {
   const s = useApp((s) => s);
+  const mobile = useNarrow();
   const selected = s.conversations.find((c) => c.id === s.selected) ?? null;
   const inThisCall = s.call && selected && s.call.conversationId === selected.id;
   // Ampliar só vale enquanto alguém transmite nessa call.
@@ -38,7 +50,6 @@ function Main() {
   const panel = s.panelOpen && stage !== 'theater' && (!!selected || !!s.call);
   // Conversas das abas ficam montadas (escondidas) para não perder rascunho e rolagem.
   // No celular não há abas: só a conversa aberta.
-  const mobile = window.innerWidth <= 700;
   const mounted = mobile
     ? selected
       ? [selected]

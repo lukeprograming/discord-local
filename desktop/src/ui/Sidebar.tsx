@@ -17,7 +17,7 @@ import {
 import { app, useApp, type Page } from '../app.ts';
 import type { Availability, Conversation } from '../../../shared/protocol.ts';
 import { Avatar, PromptModal } from './common.tsx';
-import { Settings } from './Settings.tsx';
+import { Settings, type SettingsCategory } from './Settings.tsx';
 import { FavoriteMessages, Search } from './Search.tsx';
 import { UpdateBanner } from './Update.tsx';
 import { CallDock } from './CallDock.tsx';
@@ -36,7 +36,7 @@ function loadCollapsed(): SectionId[] {
 export function Sidebar() {
   const s = useApp((s) => s);
   const [grouping, setGrouping] = useState(false);
-  const [settings, setSettings] = useState(false);
+  const [settings, setSettings] = useState<false | SettingsCategory>(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   const [favsOpen, setFavsOpen] = useState(false);
@@ -205,7 +205,7 @@ export function Sidebar() {
           <ChevronDown size={16} className="muted" />
         </button>
         {!s.frameless && <NotificationBell className="side-bell" />}
-        <button className="icon" title="Configurações" aria-label="Configurações" onClick={() => setSettings(true)}>
+        <button className="icon" title="Configurações" aria-label="Configurações" onClick={() => setSettings('audio')}>
           <SettingsIcon size={18} />
         </button>
       </div>
@@ -234,7 +234,7 @@ export function Sidebar() {
             <>
               ● host offline — histórico disponível
               <button className="link" onClick={() => app.reconnectNow()}>tentar agora</button>
-              <button className="link" title="O host mudou de VPN/IP? Troque o endereço" onClick={() => setSettings(true)}>mudar endereço</button>
+              <button className="link" title="O host mudou de VPN/IP? Troque o endereço" onClick={() => setSettings('server')}>mudar endereço</button>
             </>
           )}
         </div>
@@ -307,7 +307,7 @@ export function Sidebar() {
       <UpdateBanner />
 
       {grouping && <CreateGroup onClose={() => setGrouping(false)} />}
-      {settings && <Settings onClose={() => setSettings(false)} />}
+      {settings && <Settings initial={settings} onClose={() => setSettings(false)} />}
       {statusOpen && <StatusEditor onClose={() => setStatusOpen(false)} />}
       {searching && <Search onClose={() => setSearching(false)} />}
       {favsOpen && <FavoriteMessages onClose={() => setFavsOpen(false)} />}
